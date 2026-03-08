@@ -1,0 +1,92 @@
+{
+  "name": "VendaPerfume",
+  "type": "object",
+  "properties": {
+    "data_venda": {
+      "type": "string",
+      "format": "date",
+      "description": "Data da venda"
+    },
+    "comprador": {
+      "type": "string",
+      "description": "Nome do comprador"
+    },
+    "nome_perfume": {
+      "type": "string",
+      "description": "Nome do perfume"
+    },
+    "marca": {
+      "type": "string",
+      "description": "Marca do perfume"
+    },
+    "preco_dolar": {
+      "type": "number",
+      "description": "Pre\u00e7o em d\u00f3lar (USD)"
+    },
+    "cotacao_dolar": {
+      "type": "number",
+      "description": "Cota\u00e7\u00e3o do d\u00f3lar (R$)"
+    },
+    "custo_reais": {
+      "type": "number",
+      "description": "Custo em Reais + 20%"
+    },
+    "preco_venda": {
+      "type": "number",
+      "description": "Pre\u00e7o de venda (R$)"
+    },
+    "lucro_bruto": {
+      "type": "number",
+      "description": "Lucro bruto (R$)"
+    },
+    "lucro_liquido": {
+      "type": "number",
+      "description": "Lucro l\u00edquido (R$)"
+    },
+    "status_pagamento": {
+      "type": "string",
+      "enum": [
+        "PAGO",
+        "PENDENTE",
+        "PARCIAL"
+      ],
+      "description": "Status do pagamento"
+    },
+    "forma_pagamento": {
+      "type": "string",
+      "enum": [
+        "PIX/\u00c0 VISTA",
+        "PIX PARCELADO",
+        "CART\u00c3O",
+        "DINHEIRO"
+      ],
+      "description": "Forma de pagamento"
+    },
+    "plataforma": {
+      "type": "string",
+      "description": "Plataforma de pagamento"
+    },
+    "parcela_1": {
+      "type": "number",
+      "default": 0
+    },
+    "parcela_2": {
+      "type": "number",
+      "default": 0
+    },
+    "parcela_3": {
+      "type": "number",
+      "default": 0
+    },
+    "valor_faltante": {
+      "type": "number",
+      "default": 0,
+      "description": "Valor faltante"
+    }
+  },
+  "required": [
+    "comprador",
+    "nome_perfume",
+    "preco_venda"
+  ]
+}

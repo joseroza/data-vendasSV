@@ -1,0 +1,77 @@
+{
+  "name": "VendaEletronico",
+  "type": "object",
+  "properties": {
+    "data_venda": {
+      "type": "string",
+      "format": "date",
+      "description": "Data da venda"
+    },
+    "comprador": {
+      "type": "string",
+      "description": "Nome do comprador"
+    },
+    "produto": {
+      "type": "string",
+      "description": "Nome do produto"
+    },
+    "marca": {
+      "type": "string",
+      "description": "Marca do produto"
+    },
+    "preco_venda": {
+      "type": "number",
+      "description": "Pre\u00e7o de venda (R$)"
+    },
+    "status_pagamento": {
+      "type": "string",
+      "enum": [
+        "PAGO",
+        "PENDENTE",
+        "PARCIAL"
+      ],
+      "description": "Status do pagamento"
+    },
+    "forma_pagamento": {
+      "type": "string",
+      "enum": [
+        "PIX/\u00c0 VISTA",
+        "PIX PARCELADO",
+        "CART\u00c3O",
+        "DINHEIRO"
+      ],
+      "description": "Forma de pagamento"
+    },
+    "parcelas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "valor": {
+            "type": "number"
+          },
+          "data_vencimento": {
+            "type": "string",
+            "format": "date"
+          },
+          "pago": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "valor_pago": {
+      "type": "number",
+      "default": 0
+    },
+    "valor_faltante": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "comprador",
+    "produto",
+    "preco_venda"
+  ]
+}

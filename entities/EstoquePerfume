@@ -1,0 +1,52 @@
+{
+  "name": "EstoquePerfume",
+  "type": "object",
+  "properties": {
+    "quantidade": {
+      "type": "number",
+      "default": 0,
+      "description": "Quantidade em estoque"
+    },
+    "perfume": {
+      "type": "string",
+      "description": "Nome do perfume"
+    },
+    "genero": {
+      "type": "string",
+      "enum": [
+        "M",
+        "F",
+        "U"
+      ],
+      "description": "G\u00eanero (M=Masculino, F=Feminino, U=Unissex)"
+    },
+    "marca": {
+      "type": "string",
+      "description": "Marca do perfume"
+    },
+    "preco_dolar": {
+      "type": "number",
+      "description": "Pre\u00e7o em d\u00f3lar (USD)"
+    },
+    "preco_custo": {
+      "type": "number",
+      "description": "Pre\u00e7o de custo (R$) + 20%"
+    },
+    "preco_venda": {
+      "type": "number",
+      "description": "Pre\u00e7o de venda (R$)"
+    },
+    "preco_outros": {
+      "type": "number",
+      "description": "Pre\u00e7o para outros (R$)"
+    },
+    "preco_black_friday": {
+      "type": "number",
+      "description": "Pre\u00e7o Black Friday (R$)"
+    }
+  },
+  "required": [
+    "perfume",
+    "marca"
+  ]
+}
