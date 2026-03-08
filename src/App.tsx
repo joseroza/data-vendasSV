@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import { AppProvider } from "@/context/AppContext";
 import Dashboard from "@/pages/Dashboard";
 import Clientes from "@/pages/Clientes";
 import PerfumesVendas from "@/pages/perfumes/PerfumesVendas";
@@ -21,25 +22,27 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/clientes" element={<Clientes />} />
-            <Route path="/perfumes/vendas" element={<PerfumesVendas />} />
-            <Route path="/perfumes/nova-venda" element={<NovaPerfumeVenda />} />
-            <Route path="/perfumes/catalogo" element={<PerfumesCatalogo />} />
-            <Route path="/eletronicos/vendas" element={<EletronicosVendas />} />
-            <Route path="/eletronicos/nova-venda" element={<NovaEletronicoVenda />} />
-            <Route path="/eletronicos/catalogo" element={<EletronicosCatalogo />} />
-            <Route path="/cobrancas" element={<Cobrancas />} />
-            <Route path="/configuracoes" element={<Configuracoes />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <AppProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/clientes" element={<Clientes />} />
+              <Route path="/perfumes/vendas" element={<PerfumesVendas />} />
+              <Route path="/perfumes/nova-venda" element={<NovaPerfumeVenda />} />
+              <Route path="/perfumes/catalogo" element={<PerfumesCatalogo />} />
+              <Route path="/eletronicos/vendas" element={<EletronicosVendas />} />
+              <Route path="/eletronicos/nova-venda" element={<NovaEletronicoVenda />} />
+              <Route path="/eletronicos/catalogo" element={<EletronicosCatalogo />} />
+              <Route path="/cobrancas" element={<Cobrancas />} />
+              <Route path="/configuracoes" element={<Configuracoes />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </AppProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

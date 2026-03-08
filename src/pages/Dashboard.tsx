@@ -1,30 +1,78 @@
 import { KpiCard } from "@/components/KpiCard";
 import {
   DollarSign, TrendingUp, Calendar, Clock, AlertTriangle,
-  CheckCircle2, ArrowUpRight, Users
+  CheckCircle2, ArrowUpRight, Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useApp, useCobrancas } from "@/context/AppContext";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
-const mockPendencias = [
-  { cliente: "Maria Silva", valor: "R$ 450,00", parcela: "3/6", vencimento: "05/03/2026" },
-  { cliente: "João Santos", valor: "R$ 280,00", parcela: "2/4", vencimento: "05/03/2026" },
-  { cliente: "Ana Costa", valor: "R$ 620,00", parcela: "1/3", vencimento: "05/03/2026" },
-  { cliente: "Carlos Lima", valor: "R$ 180,00", parcela: "4/5", vencimento: "05/03/2026" },
-];
+const MESES: Record<string, number> = {
+  janeiro: 1, fevereiro: 2, marco: 3, abril: 4,
+  maio: 5, junho: 6, julho: 7, agosto: 8,
+  setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+};
 
-const mockVendasRecentes = [
-  { cliente: "Pedro Alves", produto: "Sauvage Dior", tipo: "perfume", valor: "R$ 890,00", data: "03/03/2026" },
-  { cliente: "Lucia Ferreira", produto: "iPhone 15 Pro", tipo: "eletronico", valor: "R$ 7.200,00", data: "02/03/2026" },
-  { cliente: "Roberto Dias", produto: "Bleu de Chanel", tipo: "perfume", valor: "R$ 720,00", data: "01/03/2026" },
-  { cliente: "Fernanda Reis", produto: "Samsung S24", tipo: "eletronico", valor: "R$ 4.500,00", data: "28/02/2026" },
-];
+function parseData(data: string): Date {
+  const [d, m, y] = data.split("/");
+  return new Date(+y, +m - 1, +d);
+}
+
+function formatBRL(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
 
 export default function Dashboard() {
+  const { state } = useApp();
+  const cobrancas = useCobrancas();
   const [mes, setMes] = useState("marco");
+
+  const mesNum = MESES[mes] ?? 3;
+
+  const stats = useMemo(() => {
+    const hoje = new Date();
+    let totalGeral = 0;
+    let totalMes = 0;
+    let totalSemana = 0;
+    let totalHoje = 0;
+    let totalRecebido = 0;
+    let totalPendente = 0;
+
+    for (const venda of state.vendas) {
+      const data = parseData(venda.data);
+      const valor = venda.tipo === "perfume" ? venda.valorFinal : venda.precoVenda;
+
+      totalGeral += valor;
+
+      if (data.getMonth() + 1 === mesNum && data.getFullYear() === hoje.getFullYear()) {
+        totalMes += valor;
+      }
+
+      const diffDias = (hoje.getTime() - data.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDias <= 7) totalSemana += valor;
+      if (diffDias < 1) totalHoje += valor;
+
+      if (venda.status === "pago") totalRecebido += valor;
+      else totalPendente += valor;
+    }
+
+    const totalAReceber = cobrancas.reduce((s, c) => s + c.valor, 0);
+
+    return { totalGeral, totalMes, totalSemana, totalHoje, totalRecebido, totalPendente, totalAReceber };
+  }, [state.vendas, cobrancas, mesNum]);
+
+  const vendasRecentes = useMemo(() => {
+    return [...state.vendas]
+      .sort((a, b) => parseData(b.data).getTime() - parseData(a.data).getTime())
+      .slice(0, 5);
+  }, [state.vendas]);
+
+  const cobrancasRecentes = cobrancas.slice(0, 4);
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -38,29 +86,30 @@ export default function Dashboard() {
             <SelectValue placeholder="Filtrar mês" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="janeiro">Janeiro</SelectItem>
-            <SelectItem value="fevereiro">Fevereiro</SelectItem>
-            <SelectItem value="marco">Março</SelectItem>
-            <SelectItem value="abril">Abril</SelectItem>
+            {Object.keys(MESES).map((m) => (
+              <SelectItem key={m} value={m}>
+                {m.charAt(0).toUpperCase() + m.slice(1)}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard title="Venda Total" value="R$ 48.350,00" subtitle="Acumulado geral" icon={DollarSign} />
-        <KpiCard title="Venda Mensal" value="R$ 12.890,00" subtitle="Março 2026" icon={TrendingUp} />
-        <KpiCard title="Venda Semanal" value="R$ 3.420,00" subtitle="Semana atual" icon={Calendar} />
-        <KpiCard title="Venda Diária" value="R$ 890,00" subtitle="Hoje" icon={ArrowUpRight} />
+        <KpiCard title="Venda Total" value={formatBRL(stats.totalGeral)} subtitle="Acumulado geral" icon={DollarSign} />
+        <KpiCard title="Venda Mensal" value={formatBRL(stats.totalMes)} subtitle={`${mes.charAt(0).toUpperCase() + mes.slice(1)} ${new Date().getFullYear()}`} icon={TrendingUp} />
+        <KpiCard title="Venda Semanal" value={formatBRL(stats.totalSemana)} subtitle="Últimos 7 dias" icon={Calendar} />
+        <KpiCard title="Venda Diária" value={formatBRL(stats.totalHoje)} subtitle="Hoje" icon={ArrowUpRight} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <KpiCard title="Total a Receber" value="R$ 8.230,00" icon={Clock} variant="warning" />
-        <KpiCard title="Total Recebido" value="R$ 40.120,00" icon={CheckCircle2} variant="success" />
-        <KpiCard title="Total Pendente" value="R$ 3.450,00" subtitle="12 parcelas" icon={AlertTriangle} variant="destructive" />
+        <KpiCard title="Total a Receber" value={formatBRL(stats.totalAReceber)} icon={Clock} variant="warning" />
+        <KpiCard title="Total Recebido" value={formatBRL(stats.totalRecebido)} icon={CheckCircle2} variant="success" />
+        <KpiCard title="Total Pendente" value={formatBRL(stats.totalPendente)} subtitle={`${cobrancas.length} parcelas`} icon={AlertTriangle} variant="destructive" />
       </div>
 
-      {/* Pendencias + Vendas Recentes */}
+      {/* Pendências + Vendas Recentes */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Pendências */}
         <div className="glass-card rounded-xl p-5 animate-fade-in">
@@ -70,23 +119,35 @@ export default function Dashboard() {
               Pendências / Cobranças
             </h2>
             <Badge variant="destructive" className="text-xs">
-              {mockPendencias.length} pendentes
+              {cobrancasRecentes.length} pendentes
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            Total a receber este mês: <span className="font-semibold text-foreground">R$ 1.530,00</span>
+            Total a receber:{" "}
+            <span className="font-semibold text-foreground">{formatBRL(stats.totalAReceber)}</span>
           </p>
-          <div className="space-y-3">
-            {mockPendencias.map((p, i) => (
-              <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50">
-                <div>
-                  <p className="font-medium text-sm">{p.cliente}</p>
-                  <p className="text-xs text-muted-foreground">Parcela {p.parcela} · Venc: {p.vencimento}</p>
+          {cobrancasRecentes.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Nenhuma pendência! 🎉</p>
+          ) : (
+            <div className="space-y-3">
+              {cobrancasRecentes.map((c, i) => (
+                <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50">
+                  <div>
+                    <p className="font-medium text-sm">{c.cliente}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {c.produto} · Parcela {c.parcela} · Venc: {c.vencimento}
+                    </p>
+                  </div>
+                  <span className="font-semibold text-sm">{formatBRL(c.valor)}</span>
                 </div>
-                <span className="font-semibold text-sm">{p.valor}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+          {cobrancas.length > 4 && (
+            <Button variant="ghost" size="sm" className="mt-3 w-full" asChild>
+              <Link to="/cobrancas">Ver todas ({cobrancas.length})</Link>
+            </Button>
+          )}
         </div>
 
         {/* Vendas Recentes */}
@@ -96,20 +157,24 @@ export default function Dashboard() {
             Vendas Recentes
           </h2>
           <div className="space-y-3">
-            {mockVendasRecentes.map((v, i) => (
-              <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50">
-                <div className="flex items-center gap-3">
-                  <Badge variant={v.tipo === "perfume" ? "default" : "secondary"} className="text-xs">
-                    {v.tipo === "perfume" ? "🧴" : "📱"}
-                  </Badge>
-                  <div>
-                    <p className="font-medium text-sm">{v.cliente}</p>
-                    <p className="text-xs text-muted-foreground">{v.produto} · {v.data}</p>
+            {vendasRecentes.map((v) => {
+              const produto = v.tipo === "perfume" ? v.perfume : v.produto;
+              const valor = v.tipo === "perfume" ? v.valorFinal : v.precoVenda;
+              return (
+                <div key={v.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50">
+                  <div className="flex items-center gap-3">
+                    <Badge variant={v.tipo === "perfume" ? "default" : "secondary"} className="text-xs">
+                      {v.tipo === "perfume" ? "🧴" : "📱"}
+                    </Badge>
+                    <div>
+                      <p className="font-medium text-sm">{v.cliente}</p>
+                      <p className="text-xs text-muted-foreground">{produto} · {v.data}</p>
+                    </div>
                   </div>
+                  <span className="font-semibold text-sm">{formatBRL(valor)}</span>
                 </div>
-                <span className="font-semibold text-sm">{v.valor}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

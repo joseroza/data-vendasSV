@@ -1,11 +1,27 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Settings as SettingsIcon, Percent, Users, Shield } from "lucide-react";
+import { useApp } from "@/context/AppContext";
+import { toast } from "sonner";
 
 export default function Configuracoes() {
+  const { state, dispatch } = useApp();
+  const [margem, setMargem] = useState(String(state.margem));
+
+  function salvarMargem() {
+    const num = parseFloat(margem);
+    if (isNaN(num) || num < 0 || num > 100) {
+      toast.error("Informe uma margem entre 0 e 100%.");
+      return;
+    }
+    dispatch({ type: "SET_MARGEM", payload: num });
+    toast.success(`Margem global atualizada para ${num}%`);
+  }
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
@@ -26,12 +42,19 @@ export default function Configuracoes() {
         <CardContent className="space-y-4">
           <div className="max-w-xs">
             <Label>Margem global (%)</Label>
-            <Input type="number" defaultValue="20" min={0} max={100} />
+            <Input
+              type="number"
+              value={margem}
+              onChange={(e) => setMargem(e.target.value)}
+              min={0}
+              max={100}
+            />
           </div>
           <p className="text-xs text-muted-foreground">
-            Essa margem será aplicada automaticamente em todas as novas vendas. Pode ser sobrescrita por venda individualmente.
+            Essa margem será aplicada automaticamente em todas as novas vendas.
+            Margem atual: <span className="font-semibold text-foreground">{state.margem}%</span>
           </p>
-          <Button>Salvar Margem</Button>
+          <Button onClick={salvarMargem}>Salvar Margem</Button>
         </CardContent>
       </Card>
 
