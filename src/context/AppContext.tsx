@@ -42,9 +42,11 @@ export interface AppState {
   loading: boolean; session: Session | null;
 }
 
-function dbToVenda(v: any): Venda {
-  const parcelas: Parcela[] = (v.parcelas ?? []).map((p: any) => ({
-    numero: p.numero, total: p.total, vencimento: p.vencimento, status: p.status,
+type DbRow = Record<string, unknown> & { parcelas?: Record<string, unknown>[] };
+
+function dbToVenda(v: DbRow): Venda {
+  const parcelas: Parcela[] = (v.parcelas ?? []).map((p) => ({
+    numero: p.numero as number, total: p.total as number, vencimento: p.vencimento as string, status: p.status as StatusPagamento,
   }));
   if (v.tipo === "perfume") {
     return {
@@ -69,7 +71,7 @@ interface AppContextType {
   addCliente: (c: Omit<Cliente, "id">) => Promise<void>;
   updateClienteAction: (c: Cliente) => Promise<void>;
   deleteClienteAction: (id: string) => Promise<void>;
-  addVenda: (v: Omit<Venda, "id">) => Promise<void>;
+  addVenda: (v: Omit<VendaPerfume, "id"> | Omit<VendaEletronico, "id">) => Promise<void>;
   marcarParcelaPaga: (vendaId: string, numeroParcela: number) => Promise<void>;
   marcarVendaPaga: (vendaId: string) => Promise<void>;
   addProdutoPerfume: (p: Omit<ProdutoPerfume, "id">) => Promise<void>;
@@ -138,12 +140,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, clientes: s.clientes.filter((c) => c.id !== id) }));
   }
 
-  async function addVenda(venda: Omit<Venda, "id">) {
+  async function addVenda(venda: Omit<VendaPerfume, "id"> | Omit<VendaEletronico, "id">) {
     const dbVenda = venda.tipo === "perfume"
       ? { tipo: "perfume" as const, cliente: venda.cliente, telefone: venda.telefone, perfume: venda.perfume, preco_usd: venda.precoUsd, cotacao: venda.cotacao, preco_brl: venda.precoBrl, margem_usada: venda.margemUsada, valor_final: venda.valorFinal, tipo_pagamento: venda.tipoPagamento, observacoes: venda.observacoes, data: venda.data, status: venda.status }
       : { tipo: "eletronico" as const, cliente: venda.cliente, telefone: venda.telefone, produto: venda.produto, preco_custo: venda.precoCusto, preco_venda: venda.precoVenda, lucro: venda.lucro, is_usd: venda.isUsd, preco_usd: venda.precoUsd, cotacao: venda.cotacao, margem_usada: venda.margemUsada, tipo_pagamento: venda.tipoPagamento, observacoes: venda.observacoes, data: venda.data, status: venda.status };
     const dbParcelas = venda.parcelas.map((p) => ({ numero: p.numero, total: p.total, vencimento: p.vencimento, status: p.status }));
-    await insertVenda(dbVenda as any, dbParcelas);
+    await insertVenda(dbVenda as Parameters<typeof insertVenda>[0], dbParcelas);
     await reload();
   }
 

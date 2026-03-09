@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { AppProvider, useApp } from "@/context/AppContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Clientes from "@/pages/Clientes";
@@ -24,13 +25,12 @@ const queryClient = new QueryClient();
 function AppRoutes() {
   const { state } = useApp();
 
-  // Carregando sessão
   if (state.loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold font-display">SV</span>
+            <span className="text-primary-foreground font-bold font-display text-sm">SV</span>
           </div>
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           <p className="text-sm text-muted-foreground">Carregando...</p>
@@ -39,12 +39,8 @@ function AppRoutes() {
     );
   }
 
-  // Não autenticado → Login
-  if (!state.session) {
-    return <Login />;
-  }
+  if (!state.session) return <Login />;
 
-  // Autenticado → App completo
   return (
     <BrowserRouter>
       <Routes>
@@ -68,13 +64,15 @@ function AppRoutes() {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <AppProvider>
-        <Toaster />
-        <Sonner />
-        <AppRoutes />
-      </AppProvider>
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <AppProvider>
+          <Toaster />
+          <Sonner />
+          <AppRoutes />
+        </AppProvider>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

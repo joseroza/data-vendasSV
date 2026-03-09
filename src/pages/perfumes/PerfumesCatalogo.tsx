@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,7 +9,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plus, Search, Trash2, Package, Loader2 } from "lucide-react";
+import { Plus, Search, Trash2, Package, Loader2, Calculator } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
 
@@ -18,21 +18,27 @@ interface FormState {
   nome: string;
   quantidade: string;
   precoUsd: string;
-  precoBrl: string;
+  cotacao: string;
 }
 
-const emptyForm: FormState = { marca: "", nome: "", quantidade: "", precoUsd: "", precoBrl: "" };
+const emptyForm: FormState = { marca: "", nome: "", quantidade: "", precoUsd: "", cotacao: "" };
 
 function EstoqueForm({
-  form, errors,
+  form,
+  errors,
   onChange,
+  precoBrlCalculado,
+  precoVendaCalculado,
 }: {
   form: FormState;
   errors: Partial<Record<keyof FormState, string>>;
   onChange: (k: keyof FormState, v: string) => void;
+  precoBrlCalculado: number;
+  precoVendaCalculado: number;
 }) {
   return (
     <div className="space-y-4">
+      {/* Marca e Nome */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Marca *</Label>
@@ -56,6 +62,7 @@ function EstoqueForm({
         </div>
       </div>
 
+      {/* Quantidade */}
       <div>
         <Label>Quantidade em Estoque *</Label>
         <Input
@@ -69,6 +76,7 @@ function EstoqueForm({
         {errors.quantidade && <p className="text-xs text-destructive mt-1">{errors.quantidade}</p>}
       </div>
 
+      {/* Preço USD e Cotação */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Preço de Custo (USD) *</Label>
@@ -82,17 +90,42 @@ function EstoqueForm({
           {errors.precoUsd && <p className="text-xs text-destructive mt-1">{errors.precoUsd}</p>}
         </div>
         <div>
-          <Label>Preço de Custo (BRL) *</Label>
+          <Label>Cotação USD/BRL *</Label>
           <Input
             type="number"
-            placeholder="0.00"
-            value={form.precoBrl}
-            onChange={(e) => onChange("precoBrl", e.target.value)}
-            className={errors.precoBrl ? "border-destructive" : ""}
+            placeholder="Ex: 5.80"
+            value={form.cotacao}
+            onChange={(e) => onChange("cotacao", e.target.value)}
+            className={errors.cotacao ? "border-destructive" : ""}
           />
-          {errors.precoBrl && <p className="text-xs text-destructive mt-1">{errors.precoBrl}</p>}
+          {errors.cotacao && <p className="text-xs text-destructive mt-1">{errors.cotacao}</p>}
         </div>
       </div>
+
+      {/* Valores calculados automaticamente */}
+      {precoBrlCalculado > 0 && (
+        <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+            <Calculator className="h-3.5 w-3.5" /> Calculado automaticamente
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Custo em BRL</p>
+              <p className="text-lg font-bold font-display">
+                R$ {precoBrlCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+              </p>
+              <p className="text-xs text-muted-foreground">USD × cotação</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Preço de Venda (+20%)</p>
+              <p className="text-lg font-bold font-display text-primary">
+                R$ {precoVendaCalculado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+              </p>
+              <p className="text-xs text-muted-foreground">Custo BRL + 20% margem</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -104,6 +137,12 @@ export default function PerfumesEstoque() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [loading, setLoading] = useState(false);
+
+  // Cálculos automáticos
+  const usd = parseFloat(form.precoUsd) || 0;
+  const cotacao = parseFloat(form.cotacao) || 0;
+  const precoBrlCalculado = usd * cotacao;
+  const precoVendaCalculado = precoBrlCalculado * 1.2;
 
   const filtered = state.catalogoPerfumes.filter((p) => {
     const q = search.toLowerCase();
@@ -126,8 +165,8 @@ export default function PerfumesEstoque() {
     if (!form.nome.trim()) e.nome = "Nome é obrigatório.";
     const qtd = parseInt(form.quantidade);
     if (isNaN(qtd) || qtd < 0) e.quantidade = "Informe a quantidade.";
-    if (!parseFloat(form.precoUsd) || parseFloat(form.precoUsd) <= 0) e.precoUsd = "Informe o preço USD.";
-    if (!parseFloat(form.precoBrl) || parseFloat(form.precoBrl) <= 0) e.precoBrl = "Informe o preço BRL.";
+    if (!usd || usd <= 0) e.precoUsd = "Informe o preço USD.";
+    if (!cotacao || cotacao <= 0) e.cotacao = "Informe a cotação.";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -140,8 +179,8 @@ export default function PerfumesEstoque() {
         marca: form.marca.trim(),
         nome: form.nome.trim(),
         quantidade: parseInt(form.quantidade),
-        precoUsd: parseFloat(form.precoUsd),
-        precoBrl: parseFloat(form.precoBrl),
+        precoUsd: usd,
+        precoBrl: precoVendaCalculado, // salva o preço de venda (com margem)
       });
       toast.success("Perfume adicionado ao estoque!");
       setForm(emptyForm);
@@ -191,7 +230,13 @@ export default function PerfumesEstoque() {
             <DialogHeader>
               <DialogTitle className="font-display">Adicionar ao Estoque</DialogTitle>
             </DialogHeader>
-            <EstoqueForm form={form} errors={errors} onChange={onChange} />
+            <EstoqueForm
+              form={form}
+              errors={errors}
+              onChange={onChange}
+              precoBrlCalculado={precoBrlCalculado}
+              precoVendaCalculado={precoVendaCalculado}
+            />
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
               <Button onClick={handleAdd} disabled={loading}>
@@ -222,7 +267,7 @@ export default function PerfumesEstoque() {
               <TableHead>Nome</TableHead>
               <TableHead>Estoque</TableHead>
               <TableHead>Custo USD</TableHead>
-              <TableHead>Custo BRL</TableHead>
+              <TableHead>Preço de Venda (BRL)</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
@@ -235,7 +280,7 @@ export default function PerfumesEstoque() {
                 <TableCell className="font-medium">{p.nome}</TableCell>
                 <TableCell>{estoqueLabel(p.quantidade ?? 0)}</TableCell>
                 <TableCell className="text-sm">${p.precoUsd.toFixed(2)}</TableCell>
-                <TableCell className="text-sm">
+                <TableCell className="text-sm font-semibold">
                   R$ {p.precoBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                 </TableCell>
                 <TableCell>
