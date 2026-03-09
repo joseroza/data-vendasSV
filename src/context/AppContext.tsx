@@ -33,7 +33,7 @@ export interface VendaEletronico {
 }
 export type Venda = VendaPerfume | VendaEletronico;
 export interface Cliente { id: string; nome: string; telefone: string; email: string; notas: string; }
-export interface ProdutoPerfume { id: string; nome: string; precoUsd: number; precoBrl: number; }
+export interface ProdutoPerfume { id: string; marca: string; nome: string; quantidade: number; precoUsd: number; precoBrl: number; }
 export interface ProdutoEletronico { id: string; nome: string; precoReferencia: number; }
 
 export interface AppState {
@@ -101,7 +101,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...s, margem,
         clientes: clientes.map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone, email: c.email, notas: c.notas })),
         vendas: vendasRaw.map(dbToVenda),
-        catalogoPerfumes: catalogoPerfumes.map((p) => ({ id: p.id, nome: p.nome, precoUsd: p.preco_usd, precoBrl: p.preco_brl })),
+        catalogoPerfumes: catalogoPerfumes.map((p) => ({ id: p.id, marca: p.marca, nome: p.nome, quantidade: p.quantidade, precoUsd: p.preco_usd, precoBrl: p.preco_brl })),
         catalogoEletronicos: catalogoEletronicos.map((p) => ({ id: p.id, nome: p.nome, precoReferencia: p.preco_referencia })),
         loading: false,
       }));
@@ -169,8 +169,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function addProdutoPerfume(p: Omit<ProdutoPerfume, "id">) {
-    const novo = await insertProdutoPerfume({ nome: p.nome, preco_usd: p.precoUsd, preco_brl: p.precoBrl });
-    setState((s) => ({ ...s, catalogoPerfumes: [...s.catalogoPerfumes, { id: novo.id, nome: novo.nome, precoUsd: novo.preco_usd, precoBrl: novo.preco_brl }] }));
+    const novo = await insertProdutoPerfume({ marca: p.marca, nome: p.nome, quantidade: p.quantidade, preco_usd: p.precoUsd, preco_brl: p.precoBrl });
+    setState((s) => ({ ...s, catalogoPerfumes: [...s.catalogoPerfumes, { id: novo.id, marca: novo.marca, nome: novo.nome, quantidade: novo.quantidade, precoUsd: novo.preco_usd, precoBrl: novo.preco_brl }] }));
   }
   async function deleteProdutoPerfumeAction(id: string) {
     await deleteProdutoPerfume(id);

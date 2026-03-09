@@ -1,146 +1,249 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
+} from "@/components/ui/dialog";
+import { Plus, Search, Trash2, Package, Loader2 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
 
-export default function PerfumesCatalogo() {
-  const { state, dispatch } = useApp();
+interface FormState {
+  marca: string;
+  nome: string;
+  quantidade: string;
+  precoUsd: string;
+  precoBrl: string;
+}
+
+const emptyForm: FormState = { marca: "", nome: "", quantidade: "", precoUsd: "", precoBrl: "" };
+
+function EstoqueForm({
+  form, errors,
+  onChange,
+}: {
+  form: FormState;
+  errors: Partial<Record<keyof FormState, string>>;
+  onChange: (k: keyof FormState, v: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label>Marca *</Label>
+          <Input
+            placeholder="Ex: Dior, Chanel, YSL"
+            value={form.marca}
+            onChange={(e) => onChange("marca", e.target.value)}
+            className={errors.marca ? "border-destructive" : ""}
+          />
+          {errors.marca && <p className="text-xs text-destructive mt-1">{errors.marca}</p>}
+        </div>
+        <div>
+          <Label>Nome do Perfume *</Label>
+          <Input
+            placeholder="Ex: Sauvage, Bleu..."
+            value={form.nome}
+            onChange={(e) => onChange("nome", e.target.value)}
+            className={errors.nome ? "border-destructive" : ""}
+          />
+          {errors.nome && <p className="text-xs text-destructive mt-1">{errors.nome}</p>}
+        </div>
+      </div>
+
+      <div>
+        <Label>Quantidade em Estoque *</Label>
+        <Input
+          type="number"
+          min={0}
+          placeholder="0"
+          value={form.quantidade}
+          onChange={(e) => onChange("quantidade", e.target.value)}
+          className={errors.quantidade ? "border-destructive" : ""}
+        />
+        {errors.quantidade && <p className="text-xs text-destructive mt-1">{errors.quantidade}</p>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label>Preço de Custo (USD) *</Label>
+          <Input
+            type="number"
+            placeholder="0.00"
+            value={form.precoUsd}
+            onChange={(e) => onChange("precoUsd", e.target.value)}
+            className={errors.precoUsd ? "border-destructive" : ""}
+          />
+          {errors.precoUsd && <p className="text-xs text-destructive mt-1">{errors.precoUsd}</p>}
+        </div>
+        <div>
+          <Label>Preço de Custo (BRL) *</Label>
+          <Input
+            type="number"
+            placeholder="0.00"
+            value={form.precoBrl}
+            onChange={(e) => onChange("precoBrl", e.target.value)}
+            className={errors.precoBrl ? "border-destructive" : ""}
+          />
+          {errors.precoBrl && <p className="text-xs text-destructive mt-1">{errors.precoBrl}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function PerfumesEstoque() {
+  const { state, addProdutoPerfume, deleteProdutoPerfumeAction } = useApp();
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
-  const [nome, setNome] = useState("");
-  const [precoUsd, setPrecoUsd] = useState("");
-  const [precoBrl, setPrecoBrl] = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const [loading, setLoading] = useState(false);
 
-  const filtered = state.catalogoPerfumes.filter((p) =>
-    p.nome.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = state.catalogoPerfumes.filter((p) => {
+    const q = search.toLowerCase();
+    return (
+      p.nome.toLowerCase().includes(q) ||
+      (p.marca ?? "").toLowerCase().includes(q)
+    );
+  });
 
-  function validate() {
-    const e: Record<string, string> = {};
-    if (!nome.trim()) e.nome = "Nome é obrigatório.";
-    if (!parseFloat(precoUsd) || parseFloat(precoUsd) <= 0) e.precoUsd = "Informe o preço USD.";
-    if (!parseFloat(precoBrl) || parseFloat(precoBrl) <= 0) e.precoBrl = "Informe o preço BRL.";
+  const totalItens = state.catalogoPerfumes.reduce((s, p) => s + (p.quantidade ?? 0), 0);
+
+  function onChange(k: keyof FormState, v: string) {
+    setForm((f) => ({ ...f, [k]: v }));
+    if (errors[k]) setErrors((e) => ({ ...e, [k]: undefined }));
+  }
+
+  function validate(): boolean {
+    const e: Partial<Record<keyof FormState, string>> = {};
+    if (!form.marca.trim()) e.marca = "Marca é obrigatória.";
+    if (!form.nome.trim()) e.nome = "Nome é obrigatório.";
+    const qtd = parseInt(form.quantidade);
+    if (isNaN(qtd) || qtd < 0) e.quantidade = "Informe a quantidade.";
+    if (!parseFloat(form.precoUsd) || parseFloat(form.precoUsd) <= 0) e.precoUsd = "Informe o preço USD.";
+    if (!parseFloat(form.precoBrl) || parseFloat(form.precoBrl) <= 0) e.precoBrl = "Informe o preço BRL.";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!validate()) return;
-    dispatch({
-      type: "ADD_PRODUTO_PERFUME",
-      payload: {
-        nome: nome.trim(),
-        precoUsd: parseFloat(precoUsd),
-        precoBrl: parseFloat(precoBrl),
-      },
-    });
-    toast.success("Perfume adicionado ao catálogo!");
-    setNome(""); setPrecoUsd(""); setPrecoBrl(""); setErrors({});
-    setOpen(false);
+    setLoading(true);
+    try {
+      await addProdutoPerfume({
+        marca: form.marca.trim(),
+        nome: form.nome.trim(),
+        quantidade: parseInt(form.quantidade),
+        precoUsd: parseFloat(form.precoUsd),
+        precoBrl: parseFloat(form.precoBrl),
+      });
+      toast.success("Perfume adicionado ao estoque!");
+      setForm(emptyForm);
+      setErrors({});
+      setOpen(false);
+    } catch {
+      toast.error("Erro ao adicionar perfume.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function handleDelete(id: string, nomeProd: string) {
-    dispatch({ type: "DELETE_PRODUTO_PERFUME", payload: id });
-    toast.success(`"${nomeProd}" removido do catálogo.`);
+  async function handleDelete(id: string, nome: string) {
+    try {
+      await deleteProdutoPerfumeAction(id);
+      toast.success(`"${nome}" removido do estoque.`);
+    } catch {
+      toast.error("Erro ao remover.");
+    }
+  }
+
+  function estoqueLabel(qtd: number) {
+    if (qtd === 0) return <Badge variant="destructive">Sem estoque</Badge>;
+    if (qtd <= 2) return <Badge variant="outline" className="text-warning border-warning">{qtd} un — Baixo</Badge>;
+    return <Badge variant="secondary">{qtd} un</Badge>;
   }
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="page-title">Catálogo — Perfumes</h1>
+          <h1 className="page-title flex items-center gap-2">
+            <Package className="h-6 w-6" />
+            Estoque — Perfumes
+          </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            {state.catalogoPerfumes.length} perfumes cadastrados
+            {state.catalogoPerfumes.length} perfumes · {totalItens} unidades em estoque
           </p>
         </div>
-        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setNome(""); setPrecoUsd(""); setPrecoBrl(""); setErrors({}); } }}>
+
+        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setForm(emptyForm); setErrors({}); } }}>
           <DialogTrigger asChild>
             <Button><Plus className="h-4 w-4 mr-2" />Novo Perfume</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle className="font-display">Novo Perfume</DialogTitle>
+              <DialogTitle className="font-display">Adicionar ao Estoque</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label>Nome *</Label>
-                <Input
-                  placeholder="Ex: Sauvage Dior"
-                  value={nome}
-                  onChange={(e) => setNome(e.target.value)}
-                  className={errors.nome ? "border-destructive" : ""}
-                />
-                {errors.nome && <p className="text-xs text-destructive mt-1">{errors.nome}</p>}
-              </div>
-              <div>
-                <Label>Preço USD *</Label>
-                <Input
-                  type="number"
-                  placeholder="0.00"
-                  value={precoUsd}
-                  onChange={(e) => setPrecoUsd(e.target.value)}
-                  className={errors.precoUsd ? "border-destructive" : ""}
-                />
-                {errors.precoUsd && <p className="text-xs text-destructive mt-1">{errors.precoUsd}</p>}
-              </div>
-              <div>
-                <Label>Preço BRL *</Label>
-                <Input
-                  type="number"
-                  placeholder="0.00"
-                  value={precoBrl}
-                  onChange={(e) => setPrecoBrl(e.target.value)}
-                  className={errors.precoBrl ? "border-destructive" : ""}
-                />
-                {errors.precoBrl && <p className="text-xs text-destructive mt-1">{errors.precoBrl}</p>}
-              </div>
-            </div>
+            <EstoqueForm form={form} errors={errors} onChange={onChange} />
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-              <Button onClick={handleAdd}>Adicionar</Button>
+              <Button onClick={handleAdd} disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Adicionar"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
+      {/* Busca */}
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar perfume..."
+          placeholder="Buscar por marca ou nome..."
           className="pl-9"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
 
+      {/* Tabela */}
       <div className="glass-card rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Marca</TableHead>
               <TableHead>Nome</TableHead>
-              <TableHead>Preço USD</TableHead>
-              <TableHead>Preço BRL</TableHead>
+              <TableHead>Estoque</TableHead>
+              <TableHead>Custo USD</TableHead>
+              <TableHead>Custo BRL</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.map((p) => (
               <TableRow key={p.id}>
+                <TableCell>
+                  <span className="font-semibold text-primary">{p.marca ?? "—"}</span>
+                </TableCell>
                 <TableCell className="font-medium">{p.nome}</TableCell>
-                <TableCell>${p.precoUsd.toFixed(2)}</TableCell>
-                <TableCell>R$ {p.precoBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</TableCell>
+                <TableCell>{estoqueLabel(p.quantidade ?? 0)}</TableCell>
+                <TableCell className="text-sm">${p.precoUsd.toFixed(2)}</TableCell>
+                <TableCell className="text-sm">
+                  R$ {p.precoBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                </TableCell>
                 <TableCell>
                   <Button
                     variant="ghost"
                     size="icon"
                     className="text-destructive hover:text-destructive"
-                    onClick={() => handleDelete(p.id, p.nome)}
+                    onClick={() => handleDelete(p.id, `${p.marca} ${p.nome}`)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -149,8 +252,9 @@ export default function PerfumesCatalogo() {
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                  Nenhum perfume encontrado.
+                <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
+                  <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  Nenhum perfume no estoque.
                 </TableCell>
               </TableRow>
             )}

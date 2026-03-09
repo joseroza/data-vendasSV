@@ -52,7 +52,9 @@ export type DbParcela = {
 
 export type DbProdutoPerfume = {
   id: string;
+  marca: string;
   nome: string;
+  quantidade: number;
   preco_usd: number;
   preco_brl: number;
 };
