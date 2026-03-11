@@ -5,7 +5,7 @@ import {
 import {
   supabase,
   fetchClientes, insertCliente, updateCliente, deleteCliente,
-  fetchVendas, insertVenda, updateVenda, deleteVenda, updateParcelaStatus, updateVendaStatus,
+  fetchVendas, insertVenda, updateVenda, deleteVenda, updateParcelaStatus, updateVendaStatus, recriarParcelas,
   fetchCatalogoPerfumes, insertProdutoPerfume, deleteProdutoPerfume,
   fetchCatalogoEletronicos, insertProdutoEletronico, deleteProdutoEletronico,
   fetchMargem, saveMargem,
@@ -101,6 +101,7 @@ interface AppContextType {
   updateVendaAction: (id: string, fields: Partial<Omit<VendaPerfume, "id"> | Omit<VendaEletronico, "id">>) => Promise<void>;
   deleteVendaAction: (id: string) => Promise<void>;
   marcarParcelaPaga: (vendaId: string, numeroParcela: number) => Promise<void>;
+  desmarcarParcelaPaga: (vendaId: string, numeroParcela: number) => Promise<void>;
   marcarVendaPaga: (vendaId: string) => Promise<void>;
   addProdutoPerfume: (p: Omit<ProdutoPerfume, "id">) => Promise<void>;
   deleteProdutoPerfumeAction: (id: string) => Promise<void>;
@@ -279,13 +280,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if ("precoCusto"   in fields) dbFields.preco_custo   = (fields as Partial<VendaEletronico>).precoCusto;
     if ("precoVenda"   in fields) dbFields.preco_venda   = (fields as Partial<VendaEletronico>).precoVenda;
     if ("lucro"        in fields) dbFields.lucro         = (fields as Partial<VendaEletronico>).lucro;
+    // tipoPagamento também vai para o banco
+    if ("tipoPagamento" in fields) dbFields.tipo_pagamento = (fields as any).tipoPagamento;
+
     await updateVenda(id, dbFields);
+
+    // Se parcelas foram passadas, recria no banco
+    if ("parcelas" in fields) {
+      const parcelas = (fields as any).parcelas as Parcela[];
+      await recriarParcelas(id, parcelas.map((p) => ({
+        numero: p.numero, total: p.total, vencimento: p.vencimento, status: p.status,
+      })));
+    }
+
     await reload();
   }
 
   async function deleteVendaAction(id: string) {
     await deleteVenda(id);
     setState((s) => ({ ...s, vendas: s.vendas.filter((v) => v.id !== id) }));
+  }
+
+  async function desmarcarParcelaPaga(vendaId: string, numeroParcela: number) {
+    await updateParcelaStatus(vendaId, numeroParcela, "pendente");
+    setState((s) => ({
+      ...s,
+      vendas: s.vendas.map((v) => {
+        if (v.id !== vendaId) return v;
+        const novasParcelas = v.parcelas.map((p) =>
+          p.numero === numeroParcela ? { ...p, status: "pendente" as StatusPagamento } : p
+        );
+        return { ...v, parcelas: novasParcelas, status: "pendente" as StatusPagamento };
+      }),
+    }));
   }
 
   async function marcarParcelaPaga(vendaId: string, numeroParcela: number) {
@@ -350,7 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       state,
       addCliente, updateClienteAction, deleteClienteAction,
-      addVenda, updateVendaAction, deleteVendaAction, marcarParcelaPaga, marcarVendaPaga,
+      addVenda, updateVendaAction, deleteVendaAction, marcarParcelaPaga, desmarcarParcelaPaga, marcarVendaPaga,
       addProdutoPerfume, deleteProdutoPerfumeAction,
       addProdutoEletronico, deleteProdutoEletronicoAction,
       setMargemAction, addVendedorAction, deleteVendedorAction,

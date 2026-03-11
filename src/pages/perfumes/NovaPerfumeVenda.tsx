@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Save, TrendingUp, Plus, Trash2, Calculator, DollarSign, User, Megaphone, CreditCard, Calendar } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
+import { ClienteAutocomplete } from "@/components/ClienteAutocomplete";
 import { toast } from "sonner";
 
 type PlataformaVenda = "instagram" | "whatsapp" | "indicacao" | "loja" | "outro";
@@ -25,16 +26,27 @@ interface ItemPerfume {
 
 const ITEM_VAZIO: ItemPerfume = { marca: "", nome: "", precoUsd: "", precoVenda: "" };
 
-function gerarParcelas(num: number, dataVenda: string) {
+function gerarParcelas(num: number, dataVenda: string, entrada?: number) {
   const [y, m, d] = dataVenda.split("-").map(Number);
-  return Array.from({ length: num }, (_, i) => {
-    const dt = new Date(y, m - 1 + i, d);
+  const temEntrada = entrada && entrada > 0;
+  // Parcela 0 = entrada já paga (no dia da venda)
+  const parcelaEntrada = temEntrada ? [{
+    numero: 0, total: num + 1,
+    vencimento: `${String(d).padStart(2,"0")}/${String(m).padStart(2,"0")}/${y}`,
+    status: "pago" as const,
+    isEntrada: true,
+  }] : [];
+  const totalParcelas = temEntrada ? num + 1 : num;
+  const restantes = Array.from({ length: num }, (_, i) => {
+    const dt = new Date(y, m - 1 + i + 1, d); // começa no mês seguinte quando há entrada
     return {
-      numero: i + 1, total: num,
+      numero: i + 1, total: totalParcelas,
       vencimento: `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()}`,
       status: "pendente" as const,
+      isEntrada: false,
     };
   });
+  return [...parcelaEntrada, ...restantes];
 }
 
 function fmtBRL(v: number) {
@@ -50,7 +62,7 @@ const PLATAFORMAS: { value: PlataformaVenda; label: string }[] = [
 ];
 
 export default function NovaPerfumeVenda() {
-  const { state, addVenda } = useApp();
+  const { state, addVenda, addCliente } = useApp();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
 
@@ -151,11 +163,18 @@ export default function NovaPerfumeVenda() {
     const parcelado = formasPag.includes("credito") || formasPag.includes("entrada");
     let parcelas: ReturnType<typeof gerarParcelas> = [];
     if (formasPag.includes("credito"))      parcelas = gerarParcelas(parcelasNum, dataVenda);
-    else if (formasPag.includes("entrada")) parcelas = gerarParcelas(parcelasRestNum, dataVenda);
+    else if (formasPag.includes("entrada")) parcelas = gerarParcelas(parcelasRestNum, dataVenda, entradaNum);
 
     const nomePerfumes = itens.map((i) => `${i.marca.trim()}|${i.nome.trim()}`).join(", ");
 
     try {
+      // Cadastra cliente automaticamente se ainda não existir
+      const jaExiste = state.clientes.some(
+        (c) => c.nome.trim().toLowerCase() === cliente.trim().toLowerCase()
+      );
+      if (!jaExiste && cliente.trim()) {
+        try { await addCliente({ nome: cliente.trim(), telefone: telefone.trim(), email: "", notas: "" }); } catch {}
+      }
       await addVenda({
         tipo: "perfume",
         cliente: cliente.trim(),
@@ -203,12 +222,12 @@ export default function NovaPerfumeVenda() {
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <Label>Nome *</Label>
-            <Input className={`h-10 ${errors.cliente ? "border-destructive" : ""}`}
-              placeholder="Nome completo" value={cliente} onChange={(e) => setCliente(e.target.value)} />
-            {err("cliente")}
-          </div>
+          <ClienteAutocomplete
+            value={cliente}
+            telefone={telefone}
+            onChange={(nome, tel) => { setCliente(nome); if (tel !== telefone) setTelefone(tel); }}
+            error={errors.cliente}
+          />
           <div>
             <Label>Telefone <span className="text-muted-foreground text-xs">(opcional)</span></Label>
             <Input className="h-10" placeholder="(00) 00000-0000"

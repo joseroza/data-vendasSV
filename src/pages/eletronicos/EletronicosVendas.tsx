@@ -4,13 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Search, CheckCircle2, X, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, CheckCircle2, X, Pencil, Trash2, Receipt } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import type { VendaEletronico } from "@/context/AppContext";
 import { toast } from "sonner";
+import { ParcelasModal } from "@/components/ParcelasModal";
 import { ImportCSV } from "@/components/ImportCSV";
 import type { CSVColumn } from "@/components/ImportCSV";
 
@@ -29,14 +31,19 @@ const COLUNAS_ELET_CSV: CSVColumn[] = [
 ];
 
 interface EditForm {
-  cliente:    string;
-  telefone:   string;
-  marca:      string;
-  produto:    string;
-  precoCusto: string;
-  precoVenda: string;
-  data:       string;
-  observacoes: string;
+  cliente:       string;
+  telefone:      string;
+  marca:         string;
+  produto:       string;
+  precoCusto:    string;
+  precoVenda:    string;
+  data:          string;
+  observacoes:   string;
+  tipoPagamento: "avista" | "parcelado";
+  formaPag:      "pix" | "credito";
+  numParcelas:   string;
+  valorEntrada:  string;
+  status:        "pago" | "pendente";
 }
 
 function toInputDate(dataBR: string): string {
@@ -59,6 +66,9 @@ export default function EletronicosVendas() {
   const [search,       setSearch]       = useState("");
   const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("todos");
   const [filtroData,   setFiltroData]   = useState("");
+
+  // Modal parcelas
+  const [vendaParcelas, setVendaParcelas] = useState<VendaEletronico | null>(null);
 
   // Modal edição
   const [editando,   setEditando]   = useState<VendaEletronico | null>(null);
@@ -110,15 +120,26 @@ export default function EletronicosVendas() {
     const pipeIdx      = primeiroItem.indexOf("|");
     const marcaEdit    = pipeIdx !== -1 ? primeiroItem.slice(0, pipeIdx).trim() : primeiroItem.split(" ")[0];
     const nomeEdit     = pipeIdx !== -1 ? primeiroItem.slice(pipeIdx + 1).trim() : primeiroItem.split(" ").slice(1).join(" ");
+    const temEntrada = v.parcelas.some((p) => p.numero === 0);
+    const parcelasNorm = v.parcelas.filter((p) => p.numero > 0);
+    const numParc = temEntrada ? parcelasNorm.length : (v.parcelas.length || 2);
+    const totalVal = v.precoVenda ?? 0;
+    const valorParc = (temEntrada && numParc + 1 > 0) ? totalVal / (numParc + 1) : 0;
+    const entradaStr = temEntrada ? valorParc.toFixed(2) : "";
     setForm({
-      cliente:     v.cliente,
-      telefone:    v.telefone ?? "",
-      marca:       marcaEdit,
-      produto:     nomeEdit,
-      precoCusto:  String(v.precoCusto ?? ""),
-      precoVenda:  String(v.precoVenda ?? ""),
-      data:        toInputDate(v.data),
-      observacoes: v.observacoes ?? "",
+      cliente:       v.cliente,
+      telefone:      v.telefone ?? "",
+      marca:         marcaEdit,
+      produto:       nomeEdit,
+      precoCusto:    String(v.precoCusto ?? ""),
+      precoVenda:    String(v.precoVenda ?? ""),
+      data:          toInputDate(v.data),
+      observacoes:   v.observacoes ?? "",
+      tipoPagamento: v.tipoPagamento,
+      formaPag:      "credito",
+      numParcelas:   String(numParc),
+      valorEntrada:  entradaStr,
+      status:        v.status as "pago" | "pendente",
     });
   }
 
@@ -147,15 +168,42 @@ export default function EletronicosVendas() {
     const custo = parseFloat(form.precoCusto) || 0;
     const venda = parseFloat(form.precoVenda) || 0;
     try {
+      const entradaVal = parseFloat(form.valorEntrada) || 0;
+      const temEntradaEdit = entradaVal > 0 && form.tipoPagamento === "parcelado";
+      let novasParcelas = editando.parcelas;
+      if (form.tipoPagamento === "parcelado") {
+        const num = parseInt(form.numParcelas) || 1;
+        const [d, m2, y] = fromInputDate(form.data).split("/");
+        const parcelaEntrada = temEntradaEdit ? [{
+          numero: 0, total: num + 1,
+          vencimento: `${d.padStart(2,"0")}/${m2.padStart(2,"0")}/${y}`,
+          status: "pago" as const,
+        }] : [];
+        const restantes = Array.from({ length: num }, (_, i) => {
+          const offset = temEntradaEdit ? 1 : 0;
+          const dt = new Date(parseInt(y), parseInt(m2) - 1 + i + offset, parseInt(d));
+          return {
+            numero: i + 1, total: temEntradaEdit ? num + 1 : num,
+            vencimento: `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()}`,
+            status: "pendente" as const,
+          };
+        });
+        novasParcelas = [...parcelaEntrada, ...restantes];
+      } else {
+        novasParcelas = [];
+      }
       await updateVendaAction(editando.id, {
-        cliente:    form.cliente.trim(),
-        telefone:   form.telefone.trim(),
-        produto:    `${form.marca.trim()}|${form.produto.trim()}`,
-        precoCusto: custo,
-        precoVenda: venda,
-        lucro:      venda - custo,
-        data:       fromInputDate(form.data),
-        observacoes: form.observacoes.trim(),
+        cliente:       form.cliente.trim(),
+        telefone:      form.telefone.trim(),
+        produto:       `${form.marca.trim()}|${form.produto.trim()}`,
+        precoCusto:    custo,
+        precoVenda:    venda,
+        lucro:         venda - custo,
+        data:          fromInputDate(form.data),
+        observacoes:   form.observacoes.trim(),
+        tipoPagamento: form.tipoPagamento,
+        status:        form.status,
+        parcelas:      novasParcelas,
       });
       toast.success("Venda atualizada com sucesso!");
       fecharEdicao();
@@ -354,13 +402,19 @@ export default function EletronicosVendas() {
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive">
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                        {v.status !== "pago" && (
+                        {v.tipoPagamento === "parcelado" && v.parcelas.length > 0 ? (
+                          <Button size="sm" variant="ghost"
+                            onClick={() => setVendaParcelas(v)}
+                            className="h-8 px-2 text-primary hover:text-primary text-xs">
+                            <Receipt className="h-3.5 w-3.5 mr-1" />Parcelas
+                          </Button>
+                        ) : v.status !== "pago" ? (
                           <Button size="sm" variant="ghost"
                             onClick={() => handlePagar(v.id, v.cliente)}
                             className="h-8 px-2 text-success hover:text-success text-xs">
                             <CheckCircle2 className="h-3.5 w-3.5 mr-1" />Pagar
                           </Button>
-                        )}
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -377,6 +431,12 @@ export default function EletronicosVendas() {
           </Table>
         </div>
       </div>
+
+      {/* ── Modal de Parcelas ──────────────────────────────────────────────── */}
+      <ParcelasModal
+        venda={vendaParcelas}
+        onClose={() => setVendaParcelas(null)}
+      />
 
       {/* ── Modal de Edição ─────────────────────────────────────────────────── */}
       <Dialog open={!!editando} onOpenChange={(open) => { if (!open) fecharEdicao(); }}>
@@ -486,6 +546,79 @@ export default function EletronicosVendas() {
                   onChange={(e) => setF("observacoes", e.target.value)}
                   placeholder="Anotações adicionais..."
                 />
+              </div>
+
+              {/* Pagamento & Status */}
+              <div className="rounded-lg border border-border p-3 space-y-3 bg-muted/20">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pagamento</p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {(["avista", "parcelado"] as const).map((t) => (
+                    <button key={t} type="button"
+                      onClick={() => setF("tipoPagamento", t)}
+                      className={`h-10 rounded-lg border text-sm font-medium transition-all
+                        ${form.tipoPagamento === t ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}>
+                      {t === "avista" ? "À Vista" : "Parcelado"}
+                    </button>
+                  ))}
+                </div>
+
+                {form.tipoPagamento === "parcelado" && (
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Forma do parcelamento</Label>
+                      <div className="grid grid-cols-2 gap-2 mt-1">
+                        {(["pix", "credito"] as const).map((f) => (
+                          <button key={f} type="button"
+                            onClick={() => setF("formaPag", f)}
+                            className={`h-9 rounded-lg border text-sm font-medium transition-all
+                              ${form.formaPag === f ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}>
+                            {f === "pix" ? "PIX Parcelado" : "Cartão de Crédito"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Entrada (R$) <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                        <Input className="h-10" type="number" inputMode="decimal" placeholder="0,00"
+                          value={form.valorEntrada}
+                          onChange={(e) => setF("valorEntrada", e.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Nº de Parcelas</Label>
+                        <Input className="h-10" type="number" min="1" max="24"
+                          value={form.numParcelas}
+                          onChange={(e) => setF("numParcelas", e.target.value)} />
+                      </div>
+                    </div>
+                    {(() => {
+                      const total = parseFloat(form.precoVenda) || 0;
+                      const entrada = parseFloat(form.valorEntrada) || 0;
+                      const num = parseInt(form.numParcelas) || 1;
+                      const valorParc = num > 0 ? (total - entrada) / num : 0;
+                      if (total <= 0) return null;
+                      return (
+                        <div className="rounded-lg bg-muted/40 p-2.5 text-xs space-y-1">
+                          {entrada > 0 && <p className="text-muted-foreground">Entrada: <span className="font-semibold text-foreground">{entrada.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</span></p>}
+                          <p className="text-muted-foreground">{num}x de: <span className="font-semibold text-foreground">{valorParc.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</span></p>
+                          {entrada > 0 && <p className="text-muted-foreground">Total: <span className="font-semibold text-foreground">{total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</span></p>}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between py-1 border-t border-border/50 pt-3">
+                  <div>
+                    <p className="text-sm font-medium">Status da venda</p>
+                    <p className="text-xs text-muted-foreground">{form.status === "pago" ? "Marcado como pago" : "Pendente de pagamento"}</p>
+                  </div>
+                  <Switch
+                    checked={form.status === "pago"}
+                    onCheckedChange={(checked) => setF("status", checked ? "pago" : "pendente")}
+                  />
+                </div>
               </div>
             </div>
           )}

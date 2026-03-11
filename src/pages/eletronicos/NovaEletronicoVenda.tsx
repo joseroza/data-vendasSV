@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Save, TrendingUp, Plus, Trash2, Calculator, User, Megaphone, CreditCard, Calendar, DollarSign } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
+import { ClienteAutocomplete } from "@/components/ClienteAutocomplete";
 import { toast } from "sonner";
 
 type PlataformaVenda = "instagram" | "whatsapp" | "indicacao" | "loja" | "outro";
@@ -24,23 +25,34 @@ interface ItemEletronico {
   isUsd: boolean;
   precoUsd: string;
   cotacao: string;
+  usarMargem: boolean;
 }
 
 const ITEM_VAZIO: ItemEletronico = {
   marca: "", nome: "", precoCusto: "", precoVenda: "",
-  isUsd: false, precoUsd: "", cotacao: "",
+  isUsd: false, precoUsd: "", cotacao: "", usarMargem: false,
 };
 
-function gerarParcelas(num: number, dataVenda: string) {
+function gerarParcelas(num: number, dataVenda: string, entrada?: number) {
   const [y, m, d] = dataVenda.split("-").map(Number);
-  return Array.from({ length: num }, (_, i) => {
-    const dt = new Date(y, m - 1 + i, d);
+  const temEntrada = entrada && entrada > 0;
+  const parcelaEntrada = temEntrada ? [{
+    numero: 0, total: num + 1,
+    vencimento: `${String(d).padStart(2,"0")}/${String(m).padStart(2,"0")}/${y}`,
+    status: "pago" as const,
+    isEntrada: true,
+  }] : [];
+  const totalParcelas = temEntrada ? num + 1 : num;
+  const restantes = Array.from({ length: num }, (_, i) => {
+    const dt = new Date(y, m - 1 + i + 1, d);
     return {
-      numero: i + 1, total: num,
+      numero: i + 1, total: totalParcelas,
       vencimento: `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()}`,
       status: "pendente" as const,
+      isEntrada: false,
     };
   });
+  return [...parcelaEntrada, ...restantes];
 }
 
 function fmtBRL(v: number) {
@@ -56,7 +68,7 @@ const PLATAFORMAS: { value: PlataformaVenda; label: string }[] = [
 ];
 
 export default function NovaEletronicoVenda() {
-  const { state, addVenda } = useApp();
+  const { state, addVenda, addCliente } = useApp();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
 
@@ -79,7 +91,10 @@ export default function NovaEletronicoVenda() {
     const cotNum = parseFloat(item.cotacao) || 0;
     const usd    = parseFloat(item.precoUsd) || 0;
     const custo  = item.isUsd ? usd * cotNum : parseFloat(item.precoCusto) || 0;
-    const venda  = item.isUsd ? custo * (1 + margem / 100) : parseFloat(item.precoVenda) || 0;
+    const vendaBrl = item.usarMargem && !item.isUsd
+      ? custo * (1 + margem / 100)
+      : parseFloat(item.precoVenda) || 0;
+    const venda  = item.isUsd ? custo * (1 + margem / 100) : vendaBrl;
     return { ...item, custoCalc: custo, vendaCalc: venda, lucroCalc: venda - custo, usdCalc: usd, cotCalc: cotNum };
   });
 
@@ -161,12 +176,18 @@ export default function NovaEletronicoVenda() {
     const parcelado = formasPag.includes("credito") || formasPag.includes("entrada");
     let parcelas: ReturnType<typeof gerarParcelas> = [];
     if (formasPag.includes("credito"))      parcelas = gerarParcelas(parcelasNum, dataVenda);
-    else if (formasPag.includes("entrada")) parcelas = gerarParcelas(parcelasRestNum, dataVenda);
+    else if (formasPag.includes("entrada")) parcelas = gerarParcelas(parcelasRestNum, dataVenda, entradaNum);
 
     const nomeProdutos  = itens.map((i) => `${i.marca.trim()}|${i.nome.trim()}`).join(", ");
     const primeiroItem  = itensCalc[0];
 
     try {
+      const jaExiste = state.clientes.some(
+        (c) => c.nome.trim().toLowerCase() === cliente.trim().toLowerCase()
+      );
+      if (!jaExiste && cliente.trim()) {
+        try { await addCliente({ nome: cliente.trim(), telefone: telefone.trim(), email: "", notas: "" }); } catch {}
+      }
       await addVenda({
         tipo: "eletronico",
         cliente: cliente.trim(),
@@ -215,12 +236,12 @@ export default function NovaEletronicoVenda() {
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <Label>Nome *</Label>
-            <Input className={`h-10 ${errors.cliente ? "border-destructive" : ""}`}
-              placeholder="Nome completo" value={cliente} onChange={(e) => setCliente(e.target.value)} />
-            {err("cliente")}
-          </div>
+          <ClienteAutocomplete
+            value={cliente}
+            telefone={telefone}
+            onChange={(nome, tel) => { setCliente(nome); if (tel !== telefone) setTelefone(tel); }}
+            error={errors.cliente}
+          />
           <div>
             <Label>Telefone <span className="text-muted-foreground text-xs">(opcional)</span></Label>
             <Input className="h-10" placeholder="(00) 00000-0000"
@@ -309,21 +330,57 @@ export default function NovaEletronicoVenda() {
                     </div>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label>Preço de Custo (R$) *</Label>
-                      <Input className={`h-10 ${errors[`custo_${idx}`] ? "border-destructive" : ""}`}
-                        type="number" inputMode="decimal" placeholder="0.00"
-                        value={item.precoCusto} onChange={(e) => updateItem(idx, "precoCusto", e.target.value)} />
-                      {err(`custo_${idx}`)}
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Preço de Custo (R$) *</Label>
+                        <Input className={`h-10 ${errors[`custo_${idx}`] ? "border-destructive" : ""}`}
+                          type="number" inputMode="decimal" placeholder="0.00"
+                          value={item.precoCusto} onChange={(e) => updateItem(idx, "precoCusto", e.target.value)} />
+                        {err(`custo_${idx}`)}
+                      </div>
+                      <div>
+                        <Label>
+                          Preço de Venda (R$) *
+                          {item.usarMargem && parseFloat(item.precoCusto) > 0 && (
+                            <span className="ml-1 text-xs text-muted-foreground font-normal">
+                              (automático +{margem}%)
+                            </span>
+                          )}
+                        </Label>
+                        <Input
+                          className={`h-10 ${errors[`venda_${idx}`] ? "border-destructive" : ""} ${item.usarMargem ? "bg-muted/50 text-muted-foreground" : ""}`}
+                          type="number" inputMode="decimal" placeholder="0.00"
+                          readOnly={item.usarMargem}
+                          value={
+                            item.usarMargem && parseFloat(item.precoCusto) > 0
+                              ? (parseFloat(item.precoCusto) * (1 + margem / 100)).toFixed(2)
+                              : item.precoVenda
+                          }
+                          onChange={(e) => !item.usarMargem && updateItem(idx, "precoVenda", e.target.value)}
+                        />
+                        {err(`venda_${idx}`)}
+                      </div>
                     </div>
-                    <div>
-                      <Label>Preço de Venda (R$) *</Label>
-                      <Input className={`h-10 ${errors[`venda_${idx}`] ? "border-destructive" : ""}`}
-                        type="number" inputMode="decimal" placeholder="0.00"
-                        value={item.precoVenda} onChange={(e) => updateItem(idx, "precoVenda", e.target.value)} />
-                      {err(`venda_${idx}`)}
-                    </div>
+                    {/* Checkbox margem */}
+                    <button
+                      type="button"
+                      onClick={() => updateItem(idx, "usarMargem", !item.usarMargem)}
+                      className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-lg border text-sm transition-all
+                        ${item.usarMargem
+                          ? "border-primary/40 bg-primary/5 text-primary"
+                          : "border-border bg-background text-muted-foreground hover:border-primary/30"}`}
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all
+                        ${item.usarMargem ? "bg-primary border-primary" : "border-muted-foreground"}`}>
+                        {item.usarMargem && (
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span>Aplicar margem de +{margem}% sobre o custo</span>
+                    </button>
                   </div>
                 )}
 

@@ -4,13 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Search, CheckCircle2, X, Pencil, TrendingUp, Trash2 } from "lucide-react";
+import { Plus, Search, CheckCircle2, X, Pencil, TrendingUp, Trash2, Receipt } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import type { VendaPerfume } from "@/context/AppContext";
 import { toast } from "sonner";
+import { ParcelasModal } from "@/components/ParcelasModal";
 import { ImportCSV } from "@/components/ImportCSV";
 import type { CSVColumn } from "@/components/ImportCSV";
 
@@ -30,7 +32,7 @@ const COLUNAS_CSV: CSVColumn[] = [
 ];
 
 interface EditItem { marca: string; perfume: string; precoUsd: string; cotacao: string; precoVenda: string; }
-interface EditForm { cliente: string; telefone: string; data: string; itens: EditItem[]; }
+interface EditForm { cliente: string; telefone: string; data: string; itens: EditItem[]; tipoPagamento: "avista" | "parcelado"; formaPag: "pix" | "credito"; numParcelas: string; valorEntrada: string; status: "pago" | "pendente"; }
 
 function toInputDate(d: string) { const p = d.split("/"); return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : d; }
 function fromInputDate(d: string) { const p = d.split("-"); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : d; }
@@ -68,6 +70,7 @@ export default function PerfumesVendas() {
   const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("todos");
   const [filtroMarca,  setFiltroMarca]  = useState("todos");
   const [filtroData,   setFiltroData]   = useState("");
+  const [vendaParcelas, setVendaParcelas] = useState<VendaPerfume | null>(null);
   const [editando,     setEditando]     = useState<VendaPerfume | null>(null);
   const [form,         setForm]         = useState<EditForm | null>(null);
   const [saving,       setSaving]       = useState(false);
@@ -113,7 +116,14 @@ export default function PerfumesVendas() {
       cotacao:    v.cotacao    > 0 ? String(v.cotacao)        : "",
       precoVenda: vendaPorItem > 0 ? vendaPorItem.toFixed(2)  : "",
     }));
-    setForm({ cliente: v.cliente, telefone: v.telefone ?? "", data: toInputDate(v.data), itens: itensComDados });
+    // Detecta entrada (parcela numero=0) e parcelas normais
+    const temEntrada = v.parcelas.some((p) => p.numero === 0);
+    const parcelasNorm = v.parcelas.filter((p) => p.numero > 0);
+    const numParc = temEntrada ? parcelasNorm.length : (v.parcelas.length || 2);
+    const total = v.tipo === "perfume" ? v.valorFinal : (v as any).precoVenda ?? 0;
+    const valorParc = (temEntrada && numParc + 1 > 0) ? total / (numParc + 1) : 0;
+    const entradaStr = temEntrada ? valorParc.toFixed(2) : "";
+    setForm({ cliente: v.cliente, telefone: v.telefone ?? "", data: toInputDate(v.data), itens: itensComDados, tipoPagamento: v.tipoPagamento, formaPag: "credito", numParcelas: String(numParc), valorEntrada: entradaStr, status: v.status as "pago" | "pendente" });
   }
   function fecharEdicao() { setEditando(null); setForm(null); setErros({}); }
   function setF<K extends keyof Omit<EditForm,"itens">>(k: K, val: string) { setForm((f) => f ? { ...f, [k]: val } : f); }
@@ -142,6 +152,31 @@ export default function PerfumesVendas() {
     const totalUsd     = form.itens.reduce((s, it) => s + (parseFloat(it.precoUsd) || 0), 0);
     const cotMedia     = form.itens.reduce((s, it) => s + (parseFloat(it.cotacao) || editando.cotacao), 0) / form.itens.length;
     try {
+      // Regera parcelas se mudou tipo de pagamento ou número
+      const entradaVal = parseFloat(form.valorEntrada) || 0;
+      const temEntradaEdit = entradaVal > 0 && form.tipoPagamento === "parcelado";
+      let novasParcelas = editando.parcelas;
+      if (form.tipoPagamento === "parcelado") {
+        const num = parseInt(form.numParcelas) || 1;
+        const [d, m2, y] = fromInputDate(form.data).split("/");
+        const parcelaEntrada = temEntradaEdit ? [{
+          numero: 0, total: num + 1,
+          vencimento: `${d.padStart(2,"0")}/${m2.padStart(2,"0")}/${y}`,
+          status: "pago" as const,
+        }] : [];
+        const restantes = Array.from({ length: num }, (_, i) => {
+          const offset = temEntradaEdit ? 1 : 0;
+          const dt = new Date(parseInt(y), parseInt(m2) - 1 + i + offset, parseInt(d));
+          return {
+            numero: i + 1, total: temEntradaEdit ? num + 1 : num,
+            vencimento: `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()}`,
+            status: "pendente" as const,
+          };
+        });
+        novasParcelas = [...parcelaEntrada, ...restantes];
+      } else {
+        novasParcelas = [];
+      }
       await updateVendaAction(editando.id, {
         cliente: form.cliente.trim(), telefone: form.telefone.trim(),
         perfume: nomePerfumes,
@@ -150,6 +185,9 @@ export default function PerfumesVendas() {
         precoBrl:   totalCusto || editando.precoBrl,
         valorFinal: totalVenda || editando.valorFinal,
         data: fromInputDate(form.data),
+        tipoPagamento: form.tipoPagamento,
+        status: form.status,
+        parcelas: novasParcelas,
       });
       toast.success("Venda atualizada!"); fecharEdicao();
     } catch { toast.error("Erro ao salvar."); }
@@ -319,11 +357,19 @@ export default function PerfumesVendas() {
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive">
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                        {v.status !== "pago" && (
-                          <Button size="sm" variant="ghost" onClick={() => handlePagar(v.id, v.cliente)} className="h-8 px-2 text-success hover:text-success text-xs">
+                        {v.tipoPagamento === "parcelado" && v.parcelas.length > 0 ? (
+                          <Button size="sm" variant="ghost"
+                            onClick={() => setVendaParcelas(v)}
+                            className="h-8 px-2 text-primary hover:text-primary text-xs">
+                            <Receipt className="h-3.5 w-3.5 mr-1" />Parcelas
+                          </Button>
+                        ) : v.status !== "pago" ? (
+                          <Button size="sm" variant="ghost"
+                            onClick={() => handlePagar(v.id, v.cliente)}
+                            className="h-8 px-2 text-success hover:text-success text-xs">
                             <CheckCircle2 className="h-3.5 w-3.5 mr-1" />Pagar
                           </Button>
-                        )}
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -338,6 +384,12 @@ export default function PerfumesVendas() {
           </Table>
         </div>
       </div>
+
+      {/* ── Modal de Parcelas ──────────────────────────────────────────────── */}
+      <ParcelasModal
+        venda={vendaParcelas}
+        onClose={() => setVendaParcelas(null)}
+      />
 
       {/* ── Modal de Edição ─────────────────────────────────────────────────── */}
       <Dialog open={!!editando} onOpenChange={(o) => { if (!o) fecharEdicao(); }}>
@@ -442,6 +494,86 @@ export default function PerfumesVendas() {
                     </div>
                   );
                 })}
+              </div>
+
+              {/* Pagamento & Status */}
+              <div className="rounded-lg border border-border p-3 space-y-3 bg-muted/20">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pagamento</p>
+
+                {/* Tipo: À Vista ou Parcelado */}
+                <div className="grid grid-cols-2 gap-2">
+                  {(["avista", "parcelado"] as const).map((t) => (
+                    <button key={t} type="button"
+                      onClick={() => setF("tipoPagamento", t)}
+                      className={`h-10 rounded-lg border text-sm font-medium transition-all
+                        ${form.tipoPagamento === t ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}>
+                      {t === "avista" ? "À Vista" : "Parcelado"}
+                    </button>
+                  ))}
+                </div>
+
+                {form.tipoPagamento === "parcelado" && (
+                  <div className="space-y-3">
+                    {/* Forma: PIX ou Crédito */}
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Forma do parcelamento</Label>
+                      <div className="grid grid-cols-2 gap-2 mt-1">
+                        {(["pix", "credito"] as const).map((f) => (
+                          <button key={f} type="button"
+                            onClick={() => setF("formaPag", f)}
+                            className={`h-9 rounded-lg border text-sm font-medium transition-all
+                              ${form.formaPag === f ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}>
+                            {f === "pix" ? "PIX Parcelado" : "Cartão de Crédito"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Entrada + Nº Parcelas */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Entrada (R$) <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                        <Input className="h-10" type="number" inputMode="decimal" placeholder="0,00"
+                          value={form.valorEntrada}
+                          onChange={(e) => setF("valorEntrada", e.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Nº de Parcelas</Label>
+                        <Input className="h-10" type="number" min="1" max="24"
+                          value={form.numParcelas}
+                          onChange={(e) => setF("numParcelas", e.target.value)} />
+                      </div>
+                    </div>
+
+                    {/* Preview do valor por parcela */}
+                    {(() => {
+                      const total = form.itens.reduce((s, it) => s + (parseFloat(it.precoVenda) || 0), 0) || editando?.valorFinal || 0;
+                      const entrada = parseFloat(form.valorEntrada) || 0;
+                      const num = parseInt(form.numParcelas) || 1;
+                      const restante = total - entrada;
+                      const valorParc = num > 0 ? restante / num : 0;
+                      if (total <= 0) return null;
+                      return (
+                        <div className="rounded-lg bg-muted/40 p-2.5 text-xs space-y-1">
+                          {entrada > 0 && <p className="text-muted-foreground">Entrada: <span className="font-semibold text-foreground">{entrada.toLocaleString("pt-BR", {style:"currency",currency:"BRL"})}</span></p>}
+                          <p className="text-muted-foreground">{num}x de: <span className="font-semibold text-foreground">{valorParc.toLocaleString("pt-BR", {style:"currency",currency:"BRL"})}</span></p>
+                          {entrada > 0 && <p className="text-muted-foreground">Total: <span className="font-semibold text-foreground">{total.toLocaleString("pt-BR", {style:"currency",currency:"BRL"})}</span></p>}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between py-1 border-t border-border/50 pt-3">
+                  <div>
+                    <p className="text-sm font-medium">Status da venda</p>
+                    <p className="text-xs text-muted-foreground">{form.status === "pago" ? "Marcado como pago" : "Pendente de pagamento"}</p>
+                  </div>
+                  <Switch
+                    checked={form.status === "pago"}
+                    onCheckedChange={(checked) => setF("status", checked ? "pago" : "pendente")}
+                  />
+                </div>
               </div>
             </div>
           )}

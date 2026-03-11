@@ -174,6 +174,21 @@ export async function updateVenda(
   if (error) throw error;
 }
 
+export async function recriarParcelas(
+  vendaId: string,
+  parcelas: Omit<DbParcela, "id" | "venda_id">[]
+): Promise<void> {
+  // 1. Deleta todas as parcelas existentes da venda
+  const { error: delError } = await supabase.from("parcelas").delete().eq("venda_id", vendaId);
+  if (delError) throw delError;
+  // 2. Insere as novas (só se parcelado)
+  if (parcelas.length > 0) {
+    const { error: insError } = await supabase
+      .from("parcelas").insert(parcelas.map((p) => ({ ...p, venda_id: vendaId })));
+    if (insError) throw insError;
+  }
+}
+
 export async function updateVendaStatus(
   vendaId: string, status: "pago" | "pendente"
 ): Promise<void> {
