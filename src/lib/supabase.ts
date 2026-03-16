@@ -33,6 +33,7 @@ export type DbVenda = {
   lucro?: number;
   is_usd?: boolean;
   tipo_pagamento: "avista" | "parcelado";
+  valor_entrada?: number;
   observacoes: string;
   data: string;
   status: "pago" | "pendente" | "atrasado";
@@ -40,7 +41,7 @@ export type DbVenda = {
 
 export type DbParcela = {
   id: string; venda_id: string; numero: number; total: number;
-  vencimento: string; status: "pago" | "pendente" | "atrasado";
+  vencimento: string; status: "pago" | "pendente" | "atrasado"; valor_pago?: number;
 };
 
 export type DbProdutoPerfume = {
@@ -157,6 +158,26 @@ export async function updateParcelaStatus(
 ): Promise<void> {
   const { error } = await supabase
     .from("parcelas").update({ status }).eq("venda_id", vendaId).eq("numero", numero);
+  if (error) throw error;
+}
+
+export async function registrarPagamentoParcela(
+  vendaId: string, numero: number, valorPago: number
+): Promise<void> {
+  const { error } = await supabase
+    .from("parcelas")
+    .update({ status: "pago", valor_pago: valorPago })
+    .eq("venda_id", vendaId).eq("numero", numero);
+  if (error) throw error;
+}
+
+export async function desfazerPagamentoParcela(
+  vendaId: string, numero: number
+): Promise<void> {
+  const { error } = await supabase
+    .from("parcelas")
+    .update({ status: "pendente", valor_pago: 0 })
+    .eq("venda_id", vendaId).eq("numero", numero);
   if (error) throw error;
 }
 

@@ -202,6 +202,7 @@ export default function EletronicosVendas() {
         data:          fromInputDate(form.data),
         observacoes:   form.observacoes.trim(),
         tipoPagamento: form.tipoPagamento,
+        valorEntrada:  entradaVal,
         status:        form.status,
         parcelas:      novasParcelas,
       });

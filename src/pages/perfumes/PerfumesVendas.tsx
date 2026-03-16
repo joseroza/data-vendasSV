@@ -186,6 +186,7 @@ export default function PerfumesVendas() {
         valorFinal: totalVenda || editando.valorFinal,
         data: fromInputDate(form.data),
         tipoPagamento: form.tipoPagamento,
+        valorEntrada: entradaVal,
         status: form.status,
         parcelas: novasParcelas,
       });

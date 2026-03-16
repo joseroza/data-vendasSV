@@ -201,6 +201,7 @@ export default function NovaEletronicoVenda() {
         ...(primeiroItem.isUsd ? { precoUsd: primeiroItem.usdCalc, cotacao: primeiroItem.cotCalc } : {}),
         margemUsada: margem,
         tipoPagamento: parcelado ? "parcelado" : "avista",
+        valorEntrada: formasPag.includes("entrada") ? entradaNum : 0,
         parcelas,
         observacoes: obsCompleto,
         data: dataFmt,

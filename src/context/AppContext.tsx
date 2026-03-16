@@ -6,6 +6,7 @@ import {
   supabase,
   fetchClientes, insertCliente, updateCliente, deleteCliente,
   fetchVendas, insertVenda, updateVenda, deleteVenda, updateParcelaStatus, updateVendaStatus, recriarParcelas,
+  registrarPagamentoParcela, desfazerPagamentoParcela,
   fetchCatalogoPerfumes, insertProdutoPerfume, deleteProdutoPerfume,
   fetchCatalogoEletronicos, insertProdutoEletronico, deleteProdutoEletronico,
   fetchMargem, saveMargem,
@@ -17,13 +18,14 @@ export type StatusPagamento = "pago" | "pendente" | "atrasado";
 export type TipoPagamento   = "avista" | "parcelado";
 
 export interface Parcela {
-  numero: number; total: number; vencimento: string; status: StatusPagamento;
+  numero: number; total: number; vencimento: string; status: StatusPagamento; valorPago: number;
 }
 export interface VendaPerfume {
   id: string; tipo: "perfume"; cliente: string; telefone: string;
   vendedor: string;
   perfume: string; precoUsd: number; cotacao: number; precoBrl: number;
   margemUsada: number; valorFinal: number; tipoPagamento: TipoPagamento;
+  valorEntrada?: number;
   parcelas: Parcela[]; observacoes: string; data: string; status: StatusPagamento;
 }
 export interface VendaEletronico {
@@ -31,7 +33,7 @@ export interface VendaEletronico {
   vendedor: string;
   produto: string; precoCusto: number; precoVenda: number; lucro: number;
   isUsd: boolean; precoUsd?: number; cotacao?: number; margemUsada: number;
-  tipoPagamento: TipoPagamento; parcelas: Parcela[];
+  tipoPagamento: TipoPagamento; valorEntrada?: number; parcelas: Parcela[];
   observacoes: string; data: string; status: StatusPagamento;
 }
 export type Venda = VendaPerfume | VendaEletronico;
@@ -55,6 +57,7 @@ type DbRow = Record<string, unknown> & { parcelas?: Record<string, unknown>[] };
 
 function dbToVenda(v: DbRow): Venda {
   const parcelas: Parcela[] = (v.parcelas ?? []).map((p) => ({
+    valorPago: (p.valor_pago ?? 0) as number,
     numero: p.numero as number, total: p.total as number,
     vencimento: p.vencimento as string, status: p.status as StatusPagamento,
   }));
@@ -70,6 +73,7 @@ function dbToVenda(v: DbRow): Venda {
       margemUsada: (v.margem_usada ?? 20) as number,
       valorFinal: (v.valor_final ?? 0) as number,
       tipoPagamento: v.tipo_pagamento as TipoPagamento,
+      valorEntrada: (v.valor_entrada ?? 0) as number,
       parcelas, observacoes: (v.observacoes ?? "") as string,
       data: v.data as string, status: v.status as StatusPagamento,
     };
@@ -102,6 +106,8 @@ interface AppContextType {
   deleteVendaAction: (id: string) => Promise<void>;
   marcarParcelaPaga: (vendaId: string, numeroParcela: number) => Promise<void>;
   desmarcarParcelaPaga: (vendaId: string, numeroParcela: number) => Promise<void>;
+  registrarPagamento: (vendaId: string, numeroParcela: number, valorPago: number) => Promise<void>;
+  desfazerPagamento: (vendaId: string, numeroParcela: number) => Promise<void>;
   marcarVendaPaga: (vendaId: string) => Promise<void>;
   addProdutoPerfume: (p: Omit<ProdutoPerfume, "id">) => Promise<void>;
   deleteProdutoPerfumeAction: (id: string) => Promise<void>;
@@ -246,6 +252,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       telefone: venda.telefone,
       vendedor: venda.vendedor ?? "",
       tipo_pagamento: venda.tipoPagamento,
+      valor_entrada: (venda as any).valorEntrada ?? 0,
       observacoes: venda.observacoes,
       data: venda.data,
       status: venda.status,
@@ -254,7 +261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const dbVenda = venda.tipo === "perfume"
       ? { ...base, tipo: "perfume" as const, perfume: venda.perfume, preco_usd: venda.precoUsd, cotacao: venda.cotacao, preco_brl: venda.precoBrl, valor_final: venda.valorFinal }
       : { ...base, tipo: "eletronico" as const, produto: venda.produto, preco_custo: venda.precoCusto, preco_venda: venda.precoVenda, lucro: venda.lucro, is_usd: venda.isUsd, preco_usd: venda.precoUsd, cotacao: venda.cotacao };
-    const dbParcelas = venda.parcelas.map((p) => ({ numero: p.numero, total: p.total, vencimento: p.vencimento, status: p.status }));
+    const dbParcelas = venda.parcelas.map((p) => ({ numero: p.numero, total: p.total, vencimento: p.vencimento, status: p.status, valor_pago: p.valorPago ?? 0 }));
     await insertVenda(dbVenda as Parameters<typeof insertVenda>[0], dbParcelas);
     await reload();
   }
@@ -280,8 +287,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if ("precoCusto"   in fields) dbFields.preco_custo   = (fields as Partial<VendaEletronico>).precoCusto;
     if ("precoVenda"   in fields) dbFields.preco_venda   = (fields as Partial<VendaEletronico>).precoVenda;
     if ("lucro"        in fields) dbFields.lucro         = (fields as Partial<VendaEletronico>).lucro;
-    // tipoPagamento também vai para o banco
+    // tipoPagamento e entrada também vão para o banco
     if ("tipoPagamento" in fields) dbFields.tipo_pagamento = (fields as any).tipoPagamento;
+    if ("valorEntrada"  in fields) dbFields.valor_entrada  = (fields as any).valorEntrada;
 
     await updateVenda(id, dbFields);
 
@@ -299,6 +307,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
   async function deleteVendaAction(id: string) {
     await deleteVenda(id);
     setState((s) => ({ ...s, vendas: s.vendas.filter((v) => v.id !== id) }));
+  }
+
+  async function registrarPagamento(vendaId: string, numeroParcela: number, valorPago: number) {
+    await registrarPagamentoParcela(vendaId, numeroParcela, valorPago);
+    setState((s) => ({
+      ...s,
+      vendas: s.vendas.map((v) => {
+        if (v.id !== vendaId) return v;
+        const novasParcelas = v.parcelas.map((p) =>
+          p.numero === numeroParcela ? { ...p, status: "pago" as StatusPagamento, valorPago } : p
+        );
+        const todasPagas = novasParcelas.every((p) => p.status === "pago");
+        return { ...v, parcelas: novasParcelas, status: todasPagas ? "pago" as StatusPagamento : "pendente" as StatusPagamento };
+      }),
+    }));
+  }
+
+  async function desfazerPagamento(vendaId: string, numeroParcela: number) {
+    await desfazerPagamentoParcela(vendaId, numeroParcela);
+    setState((s) => ({
+      ...s,
+      vendas: s.vendas.map((v) => {
+        if (v.id !== vendaId) return v;
+        const novasParcelas = v.parcelas.map((p) =>
+          p.numero === numeroParcela ? { ...p, status: "pendente" as StatusPagamento, valorPago: 0 } : p
+        );
+        return { ...v, parcelas: novasParcelas, status: "pendente" as StatusPagamento };
+      }),
+    }));
   }
 
   async function desmarcarParcelaPaga(vendaId: string, numeroParcela: number) {
@@ -377,7 +414,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       state,
       addCliente, updateClienteAction, deleteClienteAction,
-      addVenda, updateVendaAction, deleteVendaAction, marcarParcelaPaga, desmarcarParcelaPaga, marcarVendaPaga,
+      addVenda, updateVendaAction, deleteVendaAction,
+      marcarParcelaPaga, desmarcarParcelaPaga, marcarVendaPaga,
+      registrarPagamento, desfazerPagamento,
       addProdutoPerfume, deleteProdutoPerfumeAction,
       addProdutoEletronico, deleteProdutoEletronicoAction,
       setMargemAction, addVendedorAction, deleteVendedorAction,

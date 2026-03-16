@@ -187,6 +187,7 @@ export default function NovaPerfumeVenda() {
         margemUsada: margem,
         valorFinal: totalVenda,
         tipoPagamento: parcelado ? "parcelado" : "avista",
+        valorEntrada: formasPag.includes("entrada") ? entradaNum : 0,
         parcelas,
         observacoes: obsCompleto,
         data: dataFmt,
