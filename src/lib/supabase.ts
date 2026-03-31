@@ -278,3 +278,113 @@ export async function deleteProdutoEletronico(id: string): Promise<void> {
   const { error } = await supabase.from("catalogo_eletronicos").delete().eq("id", id);
   if (error) throw error;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADICIONE ESTAS FUNÇÕES ao final do seu src/lib/supabase.ts existente
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Novos tipos ───────────────────────────────────────────────────────────────
+
+export type DbCompra = {
+  id: string;
+  user_id?: string;
+  tipo: "perfume" | "eletronico";
+  produto_id?: string;
+  produto_nome: string;
+  marca: string;
+  quantidade: number;
+  preco_usd: number;
+  cotacao: number;
+  preco_brl: number;
+  preco_unit: number;
+  fornecedor: string;
+  origem: string;
+  data: string;
+  observacoes: string;
+  created_at?: string;
+};
+
+export type DbMovimentacao = {
+  id: string;
+  user_id?: string;
+  tipo: "perfume" | "eletronico";
+  produto_id?: string;
+  produto_nome: string;
+  marca: string;
+  operacao: "entrada" | "saida" | "ajuste";
+  origem: "compra" | "venda" | "ajuste_manual";
+  ref_id?: string;
+  quantidade: number;
+  quantidade_anterior: number;
+  quantidade_nova: number;
+  preco_unit: number;
+  data: string;
+  observacoes: string;
+  created_at?: string;
+};
+
+// ── Compras ───────────────────────────────────────────────────────────────────
+
+export async function fetchCompras(): Promise<DbCompra[]> {
+  const { data, error } = await supabase
+    .from("compras")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function insertCompra(
+  compra: Omit<DbCompra, "id" | "user_id" | "created_at">
+): Promise<DbCompra> {
+  const { data, error } = await supabase
+    .from("compras").insert(compra).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCompra(id: string): Promise<void> {
+  const { error } = await supabase.from("compras").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Movimentações de Estoque ──────────────────────────────────────────────────
+
+export async function fetchMovimentacoes(): Promise<DbMovimentacao[]> {
+  const { data, error } = await supabase
+    .from("movimentacoes_estoque")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return data;
+}
+
+export async function insertMovimentacao(
+  mov: Omit<DbMovimentacao, "id" | "user_id" | "created_at">
+): Promise<DbMovimentacao> {
+  const { data, error } = await supabase
+    .from("movimentacoes_estoque").insert(mov).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// ── Atualizar estoque no catálogo ─────────────────────────────────────────────
+
+export async function updateEstoquePerfume(
+  id: string, estoqueAtual: number, precoCustoMedio?: number
+): Promise<void> {
+  const fields: Record<string, number> = { estoque_atual: estoqueAtual, quantidade: estoqueAtual };
+  if (precoCustoMedio !== undefined) fields.preco_custo_medio = precoCustoMedio;
+  const { error } = await supabase.from("catalogo_perfumes").update(fields).eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateEstoqueEletronico(
+  id: string, estoqueAtual: number, precoCustoMedio?: number
+): Promise<void> {
+  const fields: Record<string, number> = { estoque_atual: estoqueAtual };
+  if (precoCustoMedio !== undefined) fields.preco_custo_medio = precoCustoMedio;
+  const { error } = await supabase.from("catalogo_eletronicos").update(fields).eq("id", id);
+  if (error) throw error;
+}

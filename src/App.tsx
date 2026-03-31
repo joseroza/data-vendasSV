@@ -1,7 +1,6 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { AppProvider, useApp } from "@/context/AppContext";
@@ -16,16 +15,16 @@ import EletronicosVendas from "@/pages/eletronicos/EletronicosVendas";
 import NovaEletronicoVenda from "@/pages/eletronicos/NovaEletronicoVenda";
 import EletronicosCatalogo from "@/pages/eletronicos/EletronicosCatalogo";
 import Cobrancas from "@/pages/Cobrancas";
+import Compras from "@/pages/Compras";
+import Estoque from "@/pages/Estoque";
+import Relatorios from "@/pages/Relatorios";
 import Configuracoes from "@/pages/Configuracoes";
 import Admin from "@/pages/Admin";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
-const queryClient = new QueryClient();
-
 function AppRoutes() {
   const { state } = useApp();
-
   if (state.loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -39,7 +38,6 @@ function AppRoutes() {
       </div>
     );
   }
-
   if (!state.session) {
     return (
       <Routes>
@@ -48,7 +46,6 @@ function AppRoutes() {
       </Routes>
     );
   }
-
   return (
     <Routes>
       <Route element={<Layout />}>
@@ -61,6 +58,9 @@ function AppRoutes() {
         <Route path="/eletronicos/nova-venda" element={<NovaEletronicoVenda />} />
         <Route path="/eletronicos/catalogo"   element={<EletronicosCatalogo />} />
         <Route path="/cobrancas"              element={<Cobrancas />} />
+        <Route path="/compras"                element={<Compras />} />
+        <Route path="/estoque"                element={<Estoque />} />
+        <Route path="/relatorios"             element={<Relatorios />} />
         <Route path="/configuracoes"          element={<Configuracoes />} />
         <Route path="/admin"                  element={<Admin />} />
         <Route path="/login"                  element={<Navigate to="/" replace />} />
@@ -71,20 +71,17 @@ function AppRoutes() {
 }
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ThemeProvider>
-      <TooltipProvider>
-        {/* BrowserRouter FORA do AppProvider e AppRoutes — nunca remonta */}
-        <BrowserRouter>
-          <AppProvider>
-            <Toaster />
-            <Sonner />
-            <AppRoutes />
-          </AppProvider>
-        </BrowserRouter>
-      </TooltipProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
+  <ThemeProvider>
+    <TooltipProvider>
+      <BrowserRouter>
+        <AppProvider>
+          <Toaster />
+          <Sonner />
+          <AppRoutes />
+        </AppProvider>
+      </BrowserRouter>
+    </TooltipProvider>
+  </ThemeProvider>
 );
 
 export default App;

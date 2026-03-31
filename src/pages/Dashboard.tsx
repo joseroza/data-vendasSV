@@ -1,717 +1,518 @@
+import { useMemo, useState } from "react";
+import { useApp, useCobrancas } from "@/context/AppContext";
+import type { Venda } from "@/context/AppContext";
 import {
-  DollarSign, TrendingUp, Calendar, AlertTriangle, CheckCircle2,
-  ArrowUpRight, Users, Droplets, Smartphone, ShoppingBag, UserCheck,
-  CreditCard, Clock, BarChart2, Percent, X,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
+} from "recharts";
+import {
+  TrendingUp, TrendingDown, ShoppingBag, DollarSign, AlertTriangle,
+  CheckCircle2, Clock, ArrowUpRight, ChevronDown, Droplets, Smartphone,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { useState, useMemo } from "react";
-import { useApp, useCobrancas } from "@/context/AppContext";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, LineChart, Line,
-} from "recharts";
-
-// ─── Constantes ───────────────────────────────────────────────────────────────
-
-const MESES = [
-  { value: "janeiro",   label: "Janeiro",   num: 1  },
-  { value: "fevereiro", label: "Fevereiro", num: 2  },
-  { value: "marco",     label: "Março",     num: 3  },
-  { value: "abril",     label: "Abril",     num: 4  },
-  { value: "maio",      label: "Maio",      num: 5  },
-  { value: "junho",     label: "Junho",     num: 6  },
-  { value: "julho",     label: "Julho",     num: 7  },
-  { value: "agosto",    label: "Agosto",    num: 8  },
-  { value: "setembro",  label: "Setembro",  num: 9  },
-  { value: "outubro",   label: "Outubro",   num: 10 },
-  { value: "novembro",  label: "Novembro",  num: 11 },
-  { value: "dezembro",  label: "Dezembro",  num: 12 },
-];
-
-const VENDEDOR_COLORS = ["#a855f7","#3b82f6","#10b981","#f59e0b","#ef4444","#06b6d4","#ec4899","#84cc16"];
-const mesAtualValue   = MESES[new Date().getMonth()].value;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseData(data: string): Date {
-  const [d, m, y] = data.split("/");
-  return new Date(+y, +m - 1, +d);
-}
-function formatBRL(v: number) {
+function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 function fmtK(v: number) {
-  if (v >= 1000) return `R$${(v / 1000).toFixed(1)}k`;
-  return formatBRL(v);
+  if (Math.abs(v) >= 1000) return `R$${(v / 1000).toFixed(1)}k`;
+  return fmtBRL(v);
 }
-function getLucro(venda: any): number {
-  if (venda.tipo === "perfume") return venda.valorFinal - venda.precoBrl;
-  return venda.lucro ?? (venda.precoVenda - venda.precoCusto);
+function parseData(s: string): Date {
+  const p = s.split("/");
+  if (p.length === 3) return new Date(+p[2], +p[1] - 1, +p[0]);
+  return new Date(s);
 }
-function getCusto(venda: any): number {
-  return venda.tipo === "perfume" ? (venda.precoBrl ?? 0) : (venda.precoCusto ?? 0);
+function getValor(v: Venda) {
+  return v.tipo === "perfume" ? v.valorFinal : v.precoVenda;
 }
-function getValor(venda: any): number {
-  return venda.tipo === "perfume" ? venda.valorFinal : venda.precoVenda;
+function getLucro(v: Venda) {
+  return v.tipo === "perfume" ? v.valorFinal - v.precoBrl : v.lucro;
 }
-function calcFinanceiro(venda: any) {
-  const valor      = getValor(venda);
-  const entradaVal = venda.valorEntrada || 0;
-  if (venda.tipoPagamento === "parcelado" && venda.parcelas.length > 0) {
-    const norm     = venda.parcelas.filter((p: any) => p.numero > 0);
-    const valorPar = norm.length > 0 ? (valor - entradaVal) / norm.length : 0;
-    let recebido   = 0;
-    for (const p of venda.parcelas) {
-      if (p.status === "pago") {
-        recebido += p.valorPago && p.valorPago > 0 ? p.valorPago : p.numero === 0 ? entradaVal : valorPar;
-      }
-    }
-    return { recebido, aReceber: Math.max(0, valor - recebido) };
+function calcRecebido(v: Venda): number {
+  const total = getValor(v);
+  const entrada = v.valorEntrada ?? 0;
+  if (v.tipoPagamento === "parcelado" && v.parcelas.length > 0) {
+    const normais = v.parcelas.filter((p) => p.numero > 0);
+    const valorParc = normais.length > 0 ? (total - entrada) / normais.length : 0;
+    return v.parcelas.reduce((s, p) => {
+      if (p.status !== "pago") return s;
+      return s + (p.valorPago && p.valorPago > 0 ? p.valorPago : p.numero === 0 ? entrada : valorParc);
+    }, 0);
   }
-  return venda.status === "pago" ? { recebido: valor, aReceber: 0 } : { recebido: 0, aReceber: valor };
+  return v.status === "pago" ? total : 0;
 }
 
-// ─── Sub-componentes ──────────────────────────────────────────────────────────
+const MESES = [
+  { label: "Janeiro",   short: "Jan", num: 1,  value: "01" },
+  { label: "Fevereiro", short: "Fev", num: 2,  value: "02" },
+  { label: "Março",     short: "Mar", num: 3,  value: "03" },
+  { label: "Abril",     short: "Abr", num: 4,  value: "04" },
+  { label: "Maio",      short: "Mai", num: 5,  value: "05" },
+  { label: "Junho",     short: "Jun", num: 6,  value: "06" },
+  { label: "Julho",     short: "Jul", num: 7,  value: "07" },
+  { label: "Agosto",    short: "Ago", num: 8,  value: "08" },
+  { label: "Setembro",  short: "Set", num: 9,  value: "09" },
+  { label: "Outubro",   short: "Out", num: 10, value: "10" },
+  { label: "Novembro",  short: "Nov", num: 11, value: "11" },
+  { label: "Dezembro",  short: "Dez", num: 12, value: "12" },
+];
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
-      {children}
-    </p>
-  );
-}
+const hoje = new Date();
+const mesAtualValue = String(hoje.getMonth() + 1).padStart(2, "0");
+const anoAtual = hoje.getFullYear();
 
-function StatCard({
-  icon: Icon, label, value, sub, color = "primary", large = false,
-}: {
-  icon: any; label: string; value: string; sub?: string;
-  color?: "primary" | "success" | "warning" | "destructive" | "purple" | "blue";
-  large?: boolean;
-}) {
-  const colorMap: Record<string, string> = {
-    primary:     "bg-primary/10 text-primary",
-    success:     "bg-success/10 text-success",
-    warning:     "bg-warning/10 text-warning",
-    destructive: "bg-destructive/10 text-destructive",
-    purple:      "bg-purple-500/10 text-purple-500",
-    blue:        "bg-blue-500/10 text-blue-500",
-  };
-  const textMap: Record<string, string> = {
-    primary: "", success: "text-success", warning: "text-warning",
-    destructive: "text-destructive", purple: "text-purple-500", blue: "text-blue-500",
-  };
+// ─── Tooltip customizado ──────────────────────────────────────────────────────
+
+function CustomTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
   return (
-    <div className="glass-card rounded-xl p-4 space-y-2">
-      <div className="flex items-center gap-2">
-        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${colorMap[color]}`}>
-          <Icon className="h-3.5 w-3.5" />
+    <div className="bg-card border border-border rounded-xl p-3 shadow-lg text-xs space-y-1">
+      <p className="font-semibold text-foreground mb-1">{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.name} className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full" style={{ background: p.fill || p.color }} />
+          <span className="text-muted-foreground">{p.name}:</span>
+          <span className="font-medium">{fmtBRL(p.value)}</span>
         </div>
-        <p className="text-xs font-semibold text-muted-foreground">{label}</p>
-      </div>
-      <p className={`font-bold ${large ? "text-2xl" : "text-xl"} ${textMap[color]}`}>{value}</p>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+      ))}
     </div>
   );
 }
 
-function ProgressRow({
-  label, recebido, total, color,
-}: { label: string; recebido: number; total: number; color: string }) {
-  const pct = total > 0 ? Math.min(100, (recebido / total) * 100) : 0;
+// ─── KPI Card ─────────────────────────────────────────────────────────────────
+
+interface KpiProps {
+  label: string;
+  value: string;
+  sub?: string;
+  delta?: number;
+  icon: React.ElementType;
+  accent: string;
+}
+
+function KpiCard({ label, value, sub, delta, icon: Icon, accent }: KpiProps) {
+  const up = delta !== undefined && delta >= 0;
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium">{pct.toFixed(0)}%</span>
+    <div className="bg-card border border-border rounded-2xl p-5 flex flex-col gap-3 hover:shadow-md transition-shadow">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: accent + "20" }}>
+          <Icon className="w-4 h-4" style={{ color: accent }} />
+        </div>
       </div>
-      <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+      <div>
+        <p className="text-2xl font-bold tracking-tight text-foreground">{value}</p>
+        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
       </div>
-      <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>Recebido: {formatBRL(recebido)}</span>
-        <span>Total: {formatBRL(total)}</span>
-      </div>
+      {delta !== undefined && (
+        <div className={`flex items-center gap-1 text-xs font-medium ${up ? "text-emerald-500" : "text-rose-500"}`}>
+          {up ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+          <span>{Math.abs(delta).toFixed(1)}% em relação ao mês anterior</span>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Dashboard principal ──────────────────────────────────────────────────────
+// ─── Badge status ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  if (status === "pago")
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="w-3 h-3" />Pago</span>;
+  if (status === "atrasado")
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-500/10 text-rose-500"><AlertTriangle className="w-3 h-3" />Atrasado</span>;
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400"><Clock className="w-3 h-3" />Pendente</span>;
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { state }  = useApp();
-  const cobrancas  = useCobrancas();
-  const [mes, setMes]                   = useState(mesAtualValue);
+  const { state } = useApp();
+  const cobrancas = useCobrancas();
+  const [mes, setMes] = useState(mesAtualValue);
   const [vendedorFiltro, setVendedorFiltro] = useState("todos");
 
-  const mesNum = MESES.find((m) => m.value === mes)?.num ?? new Date().getMonth() + 1;
+  const mesNum = MESES.find((m) => m.value === mes)?.num ?? hoje.getMonth() + 1;
+  const mesLabel = MESES.find((m) => m.value === mes)?.label ?? "";
 
-  // Lista de vendedores únicos — todos, incluindo o admin se ele for vendedor
+  // Vendedores únicos
   const vendedoresNomes = useMemo(() => {
-    const nomes = new Set<string>();
-    for (const v of state.vendas) {
-      const n = v.vendedor?.trim();
-      if (n) nomes.add(n);
-    }
-    for (const v of (state.vendedores ?? [])) {
-      if (v.nome?.trim()) nomes.add(v.nome.trim());
-    }
-    return Array.from(nomes).sort();
+    const s = new Set<string>();
+    for (const v of state.vendas) { if (v.vendedor?.trim()) s.add(v.vendedor.trim()); }
+    for (const v of state.vendedores ?? []) { if (v.nome?.trim()) s.add(v.nome.trim()); }
+    return Array.from(s).sort();
   }, [state.vendas, state.vendedores]);
 
-  // Vendas filtradas
   const vendasFiltradas = useMemo(() =>
-    vendedorFiltro === "todos"
-      ? state.vendas
+    vendedorFiltro === "todos" ? state.vendas
       : state.vendas.filter((v) => (v.vendedor ?? "").trim() === vendedorFiltro),
-    [state.vendas, vendedorFiltro]
-  );
+    [state.vendas, vendedorFiltro]);
 
-  // ── Stats gerais (filtradas) ──────────────────────────────────────
+  // ── KPIs gerais ───────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const hoje = new Date();
-    let totalGeral = 0, custoGeral = 0, lucroGeral = 0;
-    let totalMes = 0, custoMes = 0, lucroMes = 0;
-    let totalRecebido = 0, totalAReceber = 0, totalSemana = 0;
-    let numTotal = 0, numMes = 0, numPagas = 0, numPendentes = 0;
-    let perfFat = 0, perfRec = 0, perfAR = 0, perfLucro = 0;
-    let eletFat = 0, eletRec = 0, eletAR = 0, eletLucro = 0;
+    let fatTotal = 0, fatMes = 0, fatMesAnt = 0;
+    let lucroTotal = 0, lucroMes = 0, lucroMesAnt = 0;
+    let recebido = 0, pendente = 0;
+    let numTotal = 0, numMes = 0, numPagas = 0;
+    let perfFat = 0, eletFat = 0;
 
-    for (const venda of vendasFiltradas) {
-      const dt    = parseData(venda.data);
-      const val   = getValor(venda);
-      const custo = getCusto(venda);
-      const lucro = getLucro(venda);
-      const { recebido, aReceber } = calcFinanceiro(venda);
+    const mesAnt = mesNum === 1 ? 12 : mesNum - 1;
+    const anoMesAnt = mesNum === 1 ? anoAtual - 1 : anoAtual;
 
-      totalGeral += val; custoGeral += custo; lucroGeral += lucro;
-      totalRecebido += recebido; totalAReceber += aReceber; numTotal++;
-      if (venda.status === "pago") numPagas++; else numPendentes++;
+    for (const v of vendasFiltradas) {
+      const dt = parseData(v.data);
+      const val = getValor(v);
+      const lucro = getLucro(v);
+      const rec = calcRecebido(v);
 
-      if (dt.getMonth() + 1 === mesNum && dt.getFullYear() === hoje.getFullYear()) {
-        totalMes += val; custoMes += custo; lucroMes += lucro; numMes++;
+      fatTotal += val;
+      lucroTotal += lucro;
+      recebido += rec;
+      pendente += Math.max(0, val - rec);
+      numTotal++;
+      if (v.status === "pago") numPagas++;
+      if (v.tipo === "perfume") perfFat += val; else eletFat += val;
+
+      if (dt.getMonth() + 1 === mesNum && dt.getFullYear() === anoAtual) {
+        fatMes += val; lucroMes += lucro; numMes++;
       }
-      const dias = (hoje.getTime() - dt.getTime()) / 86400000;
-      if (dias <= 7) totalSemana += val;
-
-      if (venda.tipo === "perfume") {
-        perfFat += val; perfRec += recebido; perfAR += aReceber; perfLucro += lucro;
-      } else {
-        eletFat += val; eletRec += recebido; eletAR += aReceber; eletLucro += lucro;
+      if (dt.getMonth() + 1 === mesAnt && dt.getFullYear() === anoMesAnt) {
+        fatMesAnt += val; lucroMesAnt += lucro;
       }
     }
 
+    const deltaFat  = fatMesAnt > 0 ? ((fatMes - fatMesAnt) / fatMesAnt) * 100 : undefined;
+    const deltaLucro = lucroMesAnt > 0 ? ((lucroMes - lucroMesAnt) / lucroMesAnt) * 100 : undefined;
+
     return {
-      totalGeral, custoGeral, lucroGeral, totalMes, custoMes, lucroMes,
-      totalRecebido, totalAReceber, totalSemana, numTotal, numMes, numPagas, numPendentes,
-      perfFat, perfRec, perfAR, perfLucro,
-      eletFat, eletRec, eletAR, eletLucro,
-      margemGeral: totalGeral > 0 ? (lucroGeral / totalGeral) * 100 : 0,
-      margemMes:   totalMes   > 0 ? (lucroMes   / totalMes  ) * 100 : 0,
-      txRecebimento: totalGeral > 0 ? (totalRecebido / totalGeral) * 100 : 0,
+      fatTotal, fatMes, lucroTotal, lucroMes,
+      recebido, pendente, numTotal, numMes, numPagas,
+      perfFat, eletFat, deltaFat, deltaLucro,
+      ticketMedio: numMes > 0 ? fatMes / numMes : 0,
+      txRecebimento: fatTotal > 0 ? (recebido / fatTotal) * 100 : 0,
     };
   }, [vendasFiltradas, mesNum]);
 
-  // ── Stats por vendedor — todos, incluindo admin se for vendedor ──
-  const statsPorVendedor = useMemo(() => {
-    const mapa: Record<string, {
-      nome: string; total: number; recebido: number; pendente: number;
-      lucro: number; numVendas: number;
-    }> = {};
-    for (const venda of state.vendas) {
-      const nome = venda.vendedor?.trim();
-      if (!nome) continue;
-      const val  = getValor(venda);
-      const { recebido, aReceber } = calcFinanceiro(venda);
-      if (!mapa[nome]) mapa[nome] = { nome, total: 0, recebido: 0, pendente: 0, lucro: 0, numVendas: 0 };
-      mapa[nome].total += val;
-      mapa[nome].recebido += recebido;
-      mapa[nome].pendente += aReceber;
-      mapa[nome].lucro += getLucro(venda);
-      mapa[nome].numVendas++;
-    }
-    return Object.values(mapa).sort((a, b) => b.total - a.total);
-  }, [state.vendas]);
-
-  const totalTodosVendedores = statsPorVendedor.reduce((s, v) => s + v.total, 0);
-
-  // ── Gráfico barras — últimos 6 meses ─────────────────────────────
-  const dadosBarras = useMemo(() => {
-    const hoje = new Date();
+  // ── Gráfico — últimos 6 meses ─────────────────────────────────────
+  const dadosGrafico = useMemo(() => {
     return Array.from({ length: 6 }, (_, i) => {
       const d = new Date(hoje.getFullYear(), hoje.getMonth() - (5 - i), 1);
       const m = d.getMonth() + 1, y = d.getFullYear();
       let perfumes = 0, eletronicos = 0, lucro = 0;
-      for (const venda of vendasFiltradas) {
-        const vd = parseData(venda.data);
+      for (const v of vendasFiltradas) {
+        const vd = parseData(v.data);
         if (vd.getMonth() + 1 === m && vd.getFullYear() === y) {
-          if (venda.tipo === "perfume") perfumes += venda.valorFinal;
-          else eletronicos += venda.precoVenda;
-          lucro += getLucro(venda);
+          if (v.tipo === "perfume") perfumes += v.valorFinal;
+          else eletronicos += v.precoVenda;
+          lucro += getLucro(v);
         }
       }
-      return {
-        mes: MESES[d.getMonth()].label.slice(0, 3),
-        Perfumes: +perfumes.toFixed(2),
-        Eletrônicos: +eletronicos.toFixed(2),
-        Lucro: +lucro.toFixed(2),
-      };
+      return { mes: MESES[d.getMonth()].short, Perfumes: +perfumes.toFixed(2), Eletrônicos: +eletronicos.toFixed(2), Lucro: +lucro.toFixed(2) };
     });
   }, [vendasFiltradas]);
 
-  // ── Gráfico linha — evolução acumulada ────────────────────────────
-  const dadosLinha = useMemo(() => {
-    const hoje = new Date();
-    let acumulado = 0;
-    return Array.from({ length: 6 }, (_, i) => {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth() - (5 - i), 1);
-      const m = d.getMonth() + 1, y = d.getFullYear();
-      let mes = 0;
-      for (const venda of vendasFiltradas) {
-        const vd = parseData(venda.data);
-        if (vd.getMonth() + 1 === m && vd.getFullYear() === y) mes += getValor(venda);
-      }
-      acumulado += mes;
-      return { mes: MESES[d.getMonth()].label.slice(0, 3), Acumulado: +acumulado.toFixed(2) };
-    });
-  }, [vendasFiltradas]);
+  // ── Distribuição por categoria ────────────────────────────────────
+  const totalCats = stats.perfFat + stats.eletFat || 1;
+  const pctPerf = (stats.perfFat / totalCats) * 100;
+  const pctElet = (stats.eletFat / totalCats) * 100;
 
-  // ── Recentes ──────────────────────────────────────────────────────
-  const vendasRecentes = useMemo(() =>
-    [...vendasFiltradas].sort((a, b) => parseData(b.data).getTime() - parseData(a.data).getTime()).slice(0, 6),
-    [vendasFiltradas]
-  );
+  // ── Vendas recentes ───────────────────────────────────────────────
+  const recentes = useMemo(() =>
+    [...vendasFiltradas]
+      .sort((a, b) => parseData(b.data).getTime() - parseData(a.data).getTime())
+      .slice(0, 8),
+    [vendasFiltradas]);
 
-  const mesLabel = MESES.find((m) => m.value === mes)?.label ?? mes;
-  const anoAtual = new Date().getFullYear();
+  // ── Cobranças pendentes próximas ──────────────────────────────────
+  const proximasCobr = useMemo(() =>
+    cobrancas
+      .filter((c) => c.status !== "pago")
+      .sort((a, b) => {
+        const pa = a.vencimento.split("/"); const pb = b.vencimento.split("/");
+        return new Date(+pa[2], +pa[1]-1, +pa[0]).getTime() - new Date(+pb[2], +pb[1]-1, +pb[0]).getTime();
+      })
+      .slice(0, 5),
+    [cobrancas]);
 
-  // ─────────────────────────────────────────────────────────────────
+  const nomeProduto = (v: Venda) => {
+    const raw = v.tipo === "perfume" ? v.perfume : v.produto;
+    const seg = raw.split(",")[0].trim();
+    const pi = seg.indexOf("|");
+    return pi !== -1 ? seg.slice(pi + 1).trim() : seg;
+  };
+
   return (
-    <div className="space-y-8 max-w-7xl pb-10">
-
-      {/* ══════════════════════════════════════
-          HEADER
-      ══════════════════════════════════════ */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
+    <div className="min-h-screen bg-background">
+      {/* ── Header ──────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            {vendedorFiltro === "todos"
-              ? `Visão completa · ${anoAtual}`
-              : `Vendas de ${vendedorFiltro} · ${anoAtual}`}
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Visão geral das suas vendas</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-3">
+          {/* Filtro vendedor */}
           {vendedoresNomes.length > 0 && (
             <Select value={vendedorFiltro} onValueChange={setVendedorFiltro}>
-              <SelectTrigger className="w-[180px]">
-                <UserCheck className="h-3.5 w-3.5 mr-1 text-muted-foreground shrink-0" />
+              <SelectTrigger className="h-9 w-40 text-xs border-border rounded-xl bg-card">
                 <SelectValue placeholder="Vendedor" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="todos">Todos os vendedores</SelectItem>
-                {vendedoresNomes.map((n) => (
-                  <SelectItem key={n} value={n}>{n}</SelectItem>
-                ))}
+                <SelectItem value="todos">Todos</SelectItem>
+                {vendedoresNomes.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
               </SelectContent>
             </Select>
           )}
+          {/* Filtro mês */}
           <Select value={mes} onValueChange={setMes}>
-            <SelectTrigger className="w-[148px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-9 w-36 text-xs border-border rounded-xl bg-card">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {MESES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+              {MESES.map((m) => (
+                <SelectItem key={m.value} value={m.value}>{m.label} {anoAtual}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {/* badge filtro ativo */}
-      {vendedorFiltro !== "todos" && (
-        <div className="flex items-center gap-2 -mt-4">
-          <Badge variant="secondary" className="gap-1.5 text-xs py-1">
-            <UserCheck className="h-3 w-3" />
-            Filtrando: <strong>{vendedorFiltro}</strong>
-          </Badge>
-          <button onClick={() => setVendedorFiltro("todos")}
-            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-            <X className="h-3 w-3" /> Limpar
-          </button>
+      {/* ── KPI Cards ───────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <KpiCard
+          label="Faturamento do Mês"
+          value={fmtBRL(stats.fatMes)}
+          sub={`${stats.numMes} venda(s) em ${mesLabel}`}
+          delta={stats.deltaFat}
+          icon={DollarSign}
+          accent="#6366f1"
+        />
+        <KpiCard
+          label="Lucro do Mês"
+          value={fmtBRL(stats.lucroMes)}
+          sub={stats.fatMes > 0 ? `Margem: ${((stats.lucroMes / stats.fatMes) * 100).toFixed(1)}%` : undefined}
+          delta={stats.deltaLucro}
+          icon={TrendingUp}
+          accent="#10b981"
+        />
+        <KpiCard
+          label="Total Recebido"
+          value={fmtBRL(stats.recebido)}
+          sub={`${stats.txRecebimento.toFixed(0)}% do faturado`}
+          icon={CheckCircle2}
+          accent="#3b82f6"
+        />
+        <KpiCard
+          label="A Receber"
+          value={fmtBRL(stats.pendente)}
+          sub={`${proximasCobr.length} parcela(s) pendente(s)`}
+          icon={Clock}
+          accent="#f59e0b"
+        />
+      </div>
+
+      {/* ── Linha central: Gráfico + Distribuição ───────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+
+        {/* Gráfico de barras — ocupa 2 colunas */}
+        <div className="lg:col-span-2 bg-card border border-border rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Visão Geral de Vendas</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Últimos 6 meses</p>
+            </div>
+            <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-500 inline-block"/> Perfumes</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-sky-400 inline-block"/> Eletrônicos</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-400 inline-block"/> Lucro</span>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={dadosGrafico} barGap={4} barCategoryGap="30%">
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} tickFormatter={fmtK} axisLine={false} tickLine={false} width={55} />
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--muted)", opacity: 0.5, radius: 4 }} />
+              <Bar dataKey="Perfumes"    fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={24} />
+              <Bar dataKey="Eletrônicos" fill="#38bdf8" radius={[4, 4, 0, 0]} maxBarSize={24} />
+              <Bar dataKey="Lucro"       fill="#34d399" radius={[4, 4, 0, 0]} maxBarSize={24} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
-      )}
 
-      {/* ══════════════════════════════════════
-          SEÇÃO 1 — KPIs FINANCEIROS GERAIS
-      ══════════════════════════════════════ */}
-      <section>
-        <SectionLabel><DollarSign className="h-3.5 w-3.5" /> Resumo Financeiro Geral</SectionLabel>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard icon={ShoppingBag} label="Total de Vendas"  value={String(stats.numTotal)}        sub="vendas realizadas"                  large />
-          <StatCard icon={DollarSign}  label="Faturamento"      value={formatBRL(stats.totalGeral)}   sub={`Custo: ${formatBRL(stats.custoGeral)}`} />
-          <StatCard icon={TrendingUp}  label="Lucro Total"      value={formatBRL(stats.lucroGeral)}   sub={`Margem: ${stats.margemGeral.toFixed(1)}%`} color="success" />
-          <StatCard icon={CheckCircle2} label="Total Recebido"  value={formatBRL(stats.totalRecebido)} sub={`A receber: ${formatBRL(stats.totalAReceber)}`} color="success" />
-        </div>
+        {/* Distribuição por categoria */}
+        <div className="bg-card border border-border rounded-2xl p-6 flex flex-col justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Distribuição</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Por categoria (geral)</p>
+          </div>
 
-        {/* Segunda linha — indicadores secundários */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-          <StatCard icon={Percent}     label="Taxa de Recebimento" value={`${stats.txRecebimento.toFixed(1)}%`} sub="do faturado já recebido" color="blue" />
-          <StatCard icon={CreditCard}  label="Vendas Pagas"        value={String(stats.numPagas)}               sub={`${stats.numPendentes} pendentes`} color="success" />
-          <StatCard icon={Clock}       label="Últimos 7 dias"      value={formatBRL(stats.totalSemana)}         sub="faturamento semanal" color="warning" />
-          <StatCard icon={BarChart2}   label="Ticket Médio"        value={stats.numTotal > 0 ? formatBRL(stats.totalGeral / stats.numTotal) : "R$ 0"} sub="por venda" />
-        </div>
-      </section>
+          {/* Total geral */}
+          <div className="text-center py-4">
+            <p className="text-3xl font-bold tracking-tight">{fmtBRL(stats.fatTotal)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Faturamento total</p>
+          </div>
 
-      {/* ══════════════════════════════════════
-          SEÇÃO 2 — POR VENDEDOR
-      ══════════════════════════════════════ */}
-      {statsPorVendedor.length > 0 && (
-        <section>
-          <SectionLabel><Users className="h-3.5 w-3.5" /> Performance por Vendedor</SectionLabel>
+          {/* Barras de categoria */}
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="flex items-center gap-1.5 font-medium"><Droplets className="w-3.5 h-3.5 text-indigo-500"/> Perfumes</span>
+                <span className="text-muted-foreground">{fmtK(stats.perfFat)} · {pctPerf.toFixed(0)}%</span>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-500 rounded-full transition-all duration-700" style={{ width: `${pctPerf}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="flex items-center gap-1.5 font-medium"><Smartphone className="w-3.5 h-3.5 text-sky-400"/> Eletrônicos</span>
+                <span className="text-muted-foreground">{fmtK(stats.eletFat)} · {pctElet.toFixed(0)}%</span>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-sky-400 rounded-full transition-all duration-700" style={{ width: `${pctElet}%` }} />
+              </div>
+            </div>
 
-          {/* Totalizador */}
-          <div className="glass-card rounded-xl p-4 mb-3">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <p className="text-sm font-semibold text-muted-foreground">Consolidado — todos os vendedores</p>
-              <div className="flex gap-6 text-sm">
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Faturamento</p>
-                  <p className="font-bold">{formatBRL(totalTodosVendedores)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Recebido</p>
-                  <p className="font-bold text-success">{formatBRL(statsPorVendedor.reduce((s, v) => s + v.recebido, 0))}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Pendente</p>
-                  <p className="font-bold text-warning">{formatBRL(statsPorVendedor.reduce((s, v) => s + v.pendente, 0))}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Lucro</p>
-                  <p className="font-bold text-success">{formatBRL(statsPorVendedor.reduce((s, v) => s + v.lucro, 0))}</p>
-                </div>
+            {/* Mini stats */}
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
+              <div className="bg-muted/40 rounded-xl p-3">
+                <p className="text-[10px] text-muted-foreground">Ticket médio</p>
+                <p className="text-sm font-bold mt-0.5">{stats.numMes > 0 ? fmtBRL(stats.ticketMedio) : "—"}</p>
+              </div>
+              <div className="bg-muted/40 rounded-xl p-3">
+                <p className="text-[10px] text-muted-foreground">Vendas pagas</p>
+                <p className="text-sm font-bold mt-0.5">{stats.numPagas}/{stats.numTotal}</p>
               </div>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* Cards clicáveis por vendedor */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {statsPorVendedor.map((v, idx) => {
-              const cor    = VENDEDOR_COLORS[idx % VENDEDOR_COLORS.length];
-              const pct    = totalTodosVendedores > 0 ? (v.total / totalTodosVendedores) * 100 : 0;
-              const pctRec = v.total > 0 ? (v.recebido / v.total) * 100 : 0;
-              const isAtivo = vendedorFiltro === v.nome;
+      {/* ── Linha inferior: Recentes + Cobranças ────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* Vendas recentes — 2 colunas */}
+        <div className="lg:col-span-2 bg-card border border-border rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Vendas Recentes</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Últimas {recentes.length} transações</p>
+            </div>
+            <Link to="/perfumes/vendas" className="text-xs text-primary hover:underline flex items-center gap-1">
+              Ver todas <ArrowUpRight className="w-3 h-3" />
+            </Link>
+          </div>
+
+          <div className="divide-y divide-border">
+            {recentes.length === 0 ? (
+              <div className="px-6 py-12 text-center text-sm text-muted-foreground">
+                Nenhuma venda registrada ainda.
+              </div>
+            ) : recentes.map((v) => {
+              const val = getValor(v);
+              const rec = calcRecebido(v);
+              const pct = val > 0 ? Math.min(100, (rec / val) * 100) : 0;
               return (
-                <button
-                  key={v.nome}
-                  onClick={() => setVendedorFiltro(isAtivo ? "todos" : v.nome)}
-                  className={`glass-card rounded-xl p-4 space-y-3 text-left w-full transition-all border-2 ${
-                    isAtivo ? "border-primary/60 ring-1 ring-primary/20" : "border-transparent hover:border-border"
-                  }`}
-                >
-                  {/* Cabeçalho */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
-                        style={{ backgroundColor: cor }}
-                      >
-                        {v.nome.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold leading-tight">{v.nome}</p>
-                        <p className="text-[11px] text-muted-foreground">{v.numVendas} venda{v.numVendas !== 1 ? "s" : ""}</p>
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="text-[10px] shrink-0">{pct.toFixed(0)}% do total</Badge>
+                <div key={v.id} className="px-6 py-3.5 flex items-center gap-4 hover:bg-muted/30 transition-colors">
+                  {/* Ícone tipo */}
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${v.tipo === "perfume" ? "bg-indigo-500/10" : "bg-sky-400/10"}`}>
+                    {v.tipo === "perfume"
+                      ? <Droplets className="w-4 h-4 text-indigo-500" />
+                      : <Smartphone className="w-4 h-4 text-sky-400" />}
                   </div>
 
-                  {/* Métricas */}
-                  <div className="grid grid-cols-4 gap-1 text-center">
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Faturado</p>
-                      <p className="text-[11px] font-semibold">{fmtK(v.total)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Recebido</p>
-                      <p className="text-[11px] font-semibold text-success">{fmtK(v.recebido)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Pendente</p>
-                      <p className="text-[11px] font-semibold text-warning">{fmtK(v.pendente)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Lucro</p>
-                      <p className={`text-[11px] font-semibold ${v.lucro >= 0 ? "text-success" : "text-destructive"}`}>{fmtK(v.lucro)}</p>
-                    </div>
+                  {/* Cliente + produto */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{v.cliente}</p>
+                    <p className="text-xs text-muted-foreground truncate">{nomeProduto(v)}</p>
                   </div>
 
                   {/* Barra de recebimento */}
-                  <div className="space-y-1">
-                    <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-                      <div className="h-full rounded-full transition-all" style={{ width: `${pctRec}%`, backgroundColor: cor }} />
+                  <div className="w-20 hidden sm:block">
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${pct}%`, background: pct === 100 ? "#10b981" : "#f59e0b" }}
+                      />
                     </div>
-                    <p className="text-[10px] text-muted-foreground text-right">{pctRec.toFixed(0)}% recebido</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 text-right">{pct.toFixed(0)}%</p>
                   </div>
 
-                  {isAtivo && (
-                    <p className="text-[10px] text-primary text-center font-medium">Clique para remover filtro</p>
-                  )}
-                </button>
+                  {/* Data */}
+                  <p className="text-xs text-muted-foreground w-20 text-right hidden md:block">{v.data}</p>
+
+                  {/* Valor + status */}
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-semibold text-foreground">{fmtBRL(val)}</p>
+                    <StatusBadge status={v.status} />
+                  </div>
+                </div>
               );
             })}
           </div>
-        </section>
-      )}
-
-      {/* ══════════════════════════════════════
-          SEÇÃO 3 — MÊS SELECIONADO
-      ══════════════════════════════════════ */}
-      <section>
-        <SectionLabel><Calendar className="h-3.5 w-3.5" /> {mesLabel} {anoAtual}</SectionLabel>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard icon={ShoppingBag} label="Vendas no Mês"   value={String(stats.numMes)}        sub={`em ${mesLabel}`}                       large color="blue" />
-          <StatCard icon={DollarSign}  label="Faturamento"     value={formatBRL(stats.totalMes)}   sub={`Custo: ${formatBRL(stats.custoMes)}`}  color="blue" />
-          <StatCard icon={TrendingUp}  label="Lucro do Mês"    value={formatBRL(stats.lucroMes)}   sub={`Margem: ${stats.margemMes.toFixed(1)}%`} color="success" />
-          <StatCard icon={ArrowUpRight} label="Ticket Médio"   value={stats.numMes > 0 ? formatBRL(stats.totalMes / stats.numMes) : "R$ 0"} sub="por venda no mês" color="warning" />
         </div>
-      </section>
 
-      {/* ══════════════════════════════════════
-          SEÇÃO 4 — POR CATEGORIA
-      ══════════════════════════════════════ */}
-      <section>
-        <SectionLabel><BarChart2 className="h-3.5 w-3.5" /> Resultado por Categoria</SectionLabel>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-
-          {/* Perfumes */}
-          <div className="glass-card rounded-xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                  <Droplets className="h-4 w-4 text-purple-500" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Perfumes</p>
-                  <p className="text-xs text-muted-foreground">Lucro: <span className="text-success font-medium">{formatBRL(stats.perfLucro)}</span></p>
-                </div>
-              </div>
-              <Badge variant="outline" className="text-xs" style={{ borderColor: "#a855f7", color: "#a855f7" }}>
-                {stats.perfFat > 0 ? ((stats.perfLucro / stats.perfFat) * 100).toFixed(1) : 0}% margem
-              </Badge>
+        {/* Próximas cobranças */}
+        <div className="bg-card border border-border rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Cobranças Pendentes</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{cobrancas.filter(c => c.status !== "pago").length} parcela(s)</p>
             </div>
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="glass-card rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground mb-1">Faturamento</p>
-                <p className="font-semibold text-sm">{formatBRL(stats.perfFat)}</p>
-              </div>
-              <div className="glass-card rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground mb-1">Recebido</p>
-                <p className="font-semibold text-sm text-success">{formatBRL(stats.perfRec)}</p>
-              </div>
-              <div className="glass-card rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground mb-1">A Receber</p>
-                <p className="font-semibold text-sm text-warning">{formatBRL(stats.perfAR)}</p>
-              </div>
-            </div>
-            <ProgressRow label="Recebimento" recebido={stats.perfRec} total={stats.perfFat} color="#a855f7" />
+            <Link to="/cobrancas" className="text-xs text-primary hover:underline flex items-center gap-1">
+              Ver todas <ArrowUpRight className="w-3 h-3" />
+            </Link>
           </div>
 
-          {/* Eletrônicos */}
-          <div className="glass-card rounded-xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                  <Smartphone className="h-4 w-4 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Eletrônicos</p>
-                  <p className="text-xs text-muted-foreground">Lucro: <span className="text-success font-medium">{formatBRL(stats.eletLucro)}</span></p>
-                </div>
+          <div className="divide-y divide-border">
+            {proximasCobr.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">Tudo em dia!</p>
               </div>
-              <Badge variant="outline" className="text-xs" style={{ borderColor: "#3b82f6", color: "#3b82f6" }}>
-                {stats.eletFat > 0 ? ((stats.eletLucro / stats.eletFat) * 100).toFixed(1) : 0}% margem
-              </Badge>
-            </div>
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="glass-card rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground mb-1">Faturamento</p>
-                <p className="font-semibold text-sm">{formatBRL(stats.eletFat)}</p>
-              </div>
-              <div className="glass-card rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground mb-1">Recebido</p>
-                <p className="font-semibold text-sm text-success">{formatBRL(stats.eletRec)}</p>
-              </div>
-              <div className="glass-card rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground mb-1">A Receber</p>
-                <p className="font-semibold text-sm text-warning">{formatBRL(stats.eletAR)}</p>
-              </div>
-            </div>
-            <ProgressRow label="Recebimento" recebido={stats.eletRec} total={stats.eletFat} color="#3b82f6" />
-          </div>
-
-        </div>
-      </section>
-
-      {/* ══════════════════════════════════════
-          SEÇÃO 5 — GRÁFICOS
-      ══════════════════════════════════════ */}
-      <section>
-        <SectionLabel><TrendingUp className="h-3.5 w-3.5" /> Evolução — Últimos 6 Meses</SectionLabel>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-          {/* Barras por categoria */}
-          <div className="glass-card rounded-xl p-5">
-            <p className="text-xs font-semibold text-muted-foreground mb-4">Vendas por Categoria</p>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={dadosBarras} barGap={4} barSize={16}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" vertical={false} />
-                <XAxis dataKey="mes" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} axisLine={false} tickLine={false} />
-                <Tooltip
-                  formatter={(v: number) => formatBRL(v)}
-                  contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="Perfumes"    fill="#a855f7" radius={[4,4,0,0]} />
-                <Bar dataKey="Eletrônicos" fill="#3b82f6" radius={[4,4,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Linha de lucro */}
-          <div className="glass-card rounded-xl p-5">
-            <p className="text-xs font-semibold text-muted-foreground mb-4">Faturamento Acumulado</p>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={dadosLinha}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" vertical={false} />
-                <XAxis dataKey="mes" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} axisLine={false} tickLine={false} />
-                <Tooltip
-                  formatter={(v: number) => formatBRL(v)}
-                  contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-                />
-                <Line type="monotone" dataKey="Acumulado" stroke="#10b981" strokeWidth={2.5} dot={{ r: 4, fill: "#10b981" }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Lucro por mês */}
-          <div className="glass-card rounded-xl p-5 lg:col-span-2">
-            <p className="text-xs font-semibold text-muted-foreground mb-4">Lucro por Mês</p>
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={dadosBarras} barSize={20}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" vertical={false} />
-                <XAxis dataKey="mes" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10 }} tickFormatter={fmtK} axisLine={false} tickLine={false} />
-                <Tooltip
-                  formatter={(v: number) => formatBRL(v)}
-                  contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-                />
-                <Bar dataKey="Lucro" fill="#10b981" radius={[4,4,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-        </div>
-      </section>
-
-      {/* ══════════════════════════════════════
-          SEÇÃO 6 — COBRANÇAS + RECENTES
-      ══════════════════════════════════════ */}
-      <section>
-        <SectionLabel><AlertTriangle className="h-3.5 w-3.5" /> Pendências e Atividade Recente</SectionLabel>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-          {/* Cobranças pendentes */}
-          <div className="glass-card rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="section-title flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-warning" /> Cobranças Pendentes
-              </h2>
-              <Badge variant="destructive" className="text-xs">{cobrancas.length}</Badge>
-            </div>
-            {cobrancas.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <CheckCircle2 className="h-8 w-8 text-success mb-2 opacity-60" />
-                <p className="text-sm text-muted-foreground">Nenhuma pendência!</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {cobrancas.slice(0, 5).map((c: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50 hover:bg-muted/70 transition-colors">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm">{c.cliente}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Parcela {c.parcela} · Venc: {c.vencimento}
-                        {c.vendedor && <span className="ml-1 opacity-60">· {c.vendedor}</span>}
-                      </p>
-                    </div>
-                    <span className="font-semibold text-sm ml-3 shrink-0 text-warning">{formatBRL(c.valor)}</span>
+            ) : proximasCobr.map((c, i) => {
+              const [d, m] = c.vencimento.split("/");
+              const venc = new Date(+c.vencimento.split("/")[2], +m - 1, +d);
+              const atrasada = venc < hoje;
+              return (
+                <div key={i} className="px-5 py-3.5 flex items-center gap-3 hover:bg-muted/30 transition-colors">
+                  {/* Data pill */}
+                  <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center shrink-0 ${atrasada ? "bg-rose-500/10" : "bg-amber-500/10"}`}>
+                    <span className={`text-[10px] font-bold leading-none ${atrasada ? "text-rose-500" : "text-amber-600"}`}>{d}</span>
+                    <span className={`text-[9px] leading-none mt-0.5 ${atrasada ? "text-rose-400" : "text-amber-500"}`}>{MESES[+m - 1]?.short}</span>
                   </div>
-                ))}
-              </div>
-            )}
-            {cobrancas.length > 5 && (
-              <Button variant="ghost" size="sm" className="mt-3 w-full text-xs" asChild>
-                <Link to="/cobrancas">Ver todas as cobranças ({cobrancas.length})</Link>
-              </Button>
-            )}
-          </div>
 
-          {/* Vendas recentes */}
-          <div className="glass-card rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="section-title flex items-center gap-2">
-                <ShoppingBag className="h-4 w-4 text-primary" /> Vendas Recentes
-              </h2>
-              {vendedorFiltro !== "todos" && (
-                <Badge variant="secondary" className="text-xs">{vendedorFiltro}</Badge>
-              )}
-            </div>
-            <div className="space-y-2">
-              {vendasRecentes.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <ShoppingBag className="h-8 w-8 text-muted-foreground mb-2 opacity-40" />
-                  <p className="text-sm text-muted-foreground">Nenhuma venda registrada.</p>
-                </div>
-              ) : vendasRecentes.map((v) => {
-                const valor   = getValor(v);
-                const lucro   = getLucro(v);
-                const produto = v.tipo === "perfume"
-                  ? v.perfume.replace(/\|/g, " ").split(",")[0]
-                  : v.produto.replace(/\|/g, " ").split(",")[0];
-                const statusColor = v.status === "pago" ? "text-success" : v.status === "atrasado" ? "text-destructive" : "text-warning";
-                return (
-                  <div key={v.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50 hover:bg-muted/70 transition-colors">
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <span className="text-base shrink-0">{v.tipo === "perfume" ? "🧴" : "📱"}</span>
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm truncate">{v.cliente}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {produto} · {v.data}
-                          {v.vendedor && <span className="ml-1 opacity-60">· {v.vendedor}</span>}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 ml-3">
-                      <p className="font-semibold text-sm">{formatBRL(valor)}</p>
-                      <p className={`text-[11px] font-medium ${lucro >= 0 ? "text-success" : "text-destructive"}`}>
-                        +{formatBRL(lucro)}
-                      </p>
-                      <p className={`text-[10px] capitalize ${statusColor}`}>{v.status}</p>
-                    </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-foreground truncate">{c.cliente}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{c.parcela}</p>
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-semibold">{fmtBRL(c.valor)}</p>
+                    {atrasada && <span className="text-[10px] text-rose-500">Atrasada</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
+          {/* Resumo pendente */}
+          {proximasCobr.length > 0 && (
+            <div className="px-5 py-4 border-t border-border bg-muted/20">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Total pendente</span>
+                <span className="font-semibold text-amber-600">
+                  {fmtBRL(cobrancas.filter(c => c.status !== "pago").reduce((s, c) => s + c.valor, 0))}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
-      </section>
-
+      </div>
     </div>
   );
 }
