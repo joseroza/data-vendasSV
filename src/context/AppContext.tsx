@@ -70,12 +70,19 @@ export interface AjusteEstoque {
   quantidade_anterior: number; quantidade_nova: number;
   observacoes: string; data: string;
 }
+
 export interface AppState {
-  margem: number; clientes: Cliente[]; vendas: Venda[];
-  vendedores: Vendedor[]; catalogoPerfumes: ProdutoPerfume[];
+  margem: number;
+  clientes: Cliente[];
+  vendas: Venda[];        // só as do usuário logado — para Vendas, Cobranças, etc.
+  todasVendas: Venda[];   // todas — para Dashboard ver visão geral
+  vendedores: Vendedor[];
+  catalogoPerfumes: ProdutoPerfume[];
   catalogoEletronicos: ProdutoEletronico[];
-  compras: Compra[]; movimentacoes: Movimentacao[];
-  loading: boolean; session: Session | null;
+  compras: Compra[];
+  movimentacoes: Movimentacao[];
+  loading: boolean;
+  session: Session | null;
 }
 
 type UpdateVendaPerfumeFields    = Partial<Omit<VendaPerfume, "id" | "tipo">>;
@@ -85,10 +92,12 @@ export type UpdateVendaFields    = UpdateVendaPerfumeFields | UpdateVendaEletron
 type DbRow = Record<string, unknown> & { parcelas?: Record<string, unknown>[] };
 
 function dbToVenda(v: DbRow): Venda {
-  const parcelas: Parcela[] = (v.parcelas ?? []).map((p) => ({
-    valorPago: (p.valor_pago ?? 0) as number, numero: p.numero as number,
-    total: p.total as number, vencimento: p.vencimento as string,
-    status: p.status as StatusPagamento,
+  const rawParcelas = v.parcelas;
+  const parcelasArr: Record<string, unknown>[] = Array.isArray(rawParcelas) ? rawParcelas : [];
+  const parcelas: Parcela[] = parcelasArr.map((p) => ({
+    valorPago: (p.valor_pago ?? 0) as number,
+    numero: p.numero as number, total: p.total as number,
+    vencimento: p.vencimento as string, status: p.status as StatusPagamento,
   }));
   if (v.tipo === "perfume") {
     return {
@@ -147,7 +156,7 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>({
-    margem: 20, clientes: [], vendas: [], vendedores: [],
+    margem: 20, clientes: [], vendas: [], todasVendas: [], vendedores: [],
     catalogoPerfumes: [], catalogoEletronicos: [],
     compras: [], movimentacoes: [], loading: true, session: null,
   });
@@ -160,17 +169,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const [margem, clientes, vendasRaw, catalogoPerfumes, catalogoEletronicos] =
         await Promise.all([fetchMargem(), fetchClientes(), fetchVendas(), fetchCatalogoPerfumes(), fetchCatalogoEletronicos()]);
+
       let vendedoresRaw: { id: string; nome: string; email: string; ativo: boolean }[] = [];
       try { vendedoresRaw = await fetchVendedores(); } catch { /* opcional */ }
+
       let comprasRaw: Awaited<ReturnType<typeof fetchCompras>> = [];
-      try { comprasRaw = await fetchCompras(); } catch { /* tabela pode não existir ainda */ }
+      try { comprasRaw = await fetchCompras(); } catch { /* tabela pode não existir */ }
+
       let movsRaw: Awaited<ReturnType<typeof fetchMovimentacoes>> = [];
-      try { movsRaw = await fetchMovimentacoes(); } catch { /* tabela pode não existir ainda */ }
+      try { movsRaw = await fetchMovimentacoes(); } catch { /* tabela pode não existir */ }
+
+      // Busca TODAS as vendas para o Dashboard via função SECURITY DEFINER (ignora RLS)
+      let todasVendasRaw: DbRow[] = vendasRaw as unknown as DbRow[];
+      try {
+        const { data } = await supabase.rpc("get_all_vendas_dashboard");
+        if (data && Array.isArray(data)) todasVendasRaw = data as DbRow[];
+      } catch { /* fallback: usa só as próprias */ }
 
       setState((s) => ({
         ...s, margem,
         clientes: clientes.map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone, email: c.email, notas: c.notas })),
-        vendas: vendasRaw.map(dbToVenda),
+        vendas:      (vendasRaw as unknown as DbRow[]).map(dbToVenda),
+        todasVendas: todasVendasRaw.map(dbToVenda),
         vendedores: vendedoresRaw.map((v) => ({ id: v.id, nome: v.nome, email: v.email, ativo: v.ativo })),
         catalogoPerfumes: catalogoPerfumes.map((p) => ({
           id: p.id, marca: p.marca, nome: p.nome, quantidade: p.quantidade,
@@ -219,8 +239,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!session) {
         dataLoaded.current = false;
         setState((s) => ({
-          ...s, session: null, loading: false, clientes: [], vendas: [],
-          vendedores: [], catalogoPerfumes: [], catalogoEletronicos: [],
+          ...s, session: null, loading: false,
+          clientes: [], vendas: [], todasVendas: [], vendedores: [],
+          catalogoPerfumes: [], catalogoEletronicos: [],
           compras: [], movimentacoes: [],
         }));
       }
@@ -253,23 +274,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       : { ...base, tipo: "eletronico" as const, produto: (venda as VendaEletronico).produto, preco_custo: (venda as VendaEletronico).precoCusto, preco_venda: (venda as VendaEletronico).precoVenda, lucro: (venda as VendaEletronico).lucro, is_usd: (venda as VendaEletronico).isUsd, preco_usd: (venda as VendaEletronico).precoUsd, cotacao: (venda as VendaEletronico).cotacao };
     const dbParcelas = venda.parcelas.map((p) => ({ numero: p.numero, total: p.total, vencimento: p.vencimento, status: p.status }));
     const nova = await insertVenda(dbVenda as Parameters<typeof insertVenda>[0], dbParcelas);
-    // Saída de estoque automática
-    try {
-      const segs = venda.tipo === "perfume"
-        ? (venda as VendaPerfume).perfume.split(",")
-        : [(venda as VendaEletronico).produto.split(",")[0]];
-      for (const seg of segs) {
-        const t = seg.trim(); const pi = t.indexOf("|");
-        const nome = pi !== -1 ? t.slice(pi + 1).trim() : t;
-        await insertMovimentacao({
-          tipo: venda.tipo, produto_nome: nome, marca: "", operacao: "saida", origem: "venda",
-          ref_id: nova.id, quantidade: -1, quantidade_anterior: 0, quantidade_nova: 0,
-          preco_unit: 0, data: venda.data, observacoes: `Venda para ${venda.cliente}`,
-        });
-      }
-    } catch { /* silencia */ }
     const novaVenda = dbToVenda({ ...nova, parcelas: dbParcelas.map((p, i) => ({ ...p, id: `tmp-${i}`, venda_id: nova.id, valor_pago: 0 })) } as DbRow);
-    setState((s) => ({ ...s, vendas: [novaVenda, ...s.vendas] }));
+    setState((s) => ({ ...s, vendas: [novaVenda, ...s.vendas], todasVendas: [novaVenda, ...s.todasVendas] }));
   }
 
   async function updateVendaAction(id: string, fields: UpdateVendaFields) {
@@ -299,71 +305,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
         numero: p.numero, total: p.total, vencimento: p.vencimento, status: p.status,
       })));
     }
-    setState((s) => ({
-      ...s,
-      vendas: s.vendas.map((v) => {
-        if (v.id !== id) return v;
-        const parcelasAtualizadas = ("parcelas" in fields && fields.parcelas !== undefined)
-          ? (fields.parcelas as Parcela[]) : v.parcelas;
-        return { ...v, ...fields, parcelas: parcelasAtualizadas };
-      }),
-    }));
+    const atualizar = (lista: Venda[]) => lista.map((v) => {
+      if (v.id !== id) return v;
+      const parcelasAtualizadas = ("parcelas" in fields && fields.parcelas !== undefined) ? (fields.parcelas as Parcela[]) : v.parcelas;
+      return { ...v, ...fields, parcelas: parcelasAtualizadas };
+    });
+    setState((s) => ({ ...s, vendas: atualizar(s.vendas), todasVendas: atualizar(s.todasVendas) }));
   }
 
   async function deleteVendaAction(id: string) {
     await deleteVenda(id);
-    setState((s) => ({ ...s, vendas: s.vendas.filter((v) => v.id !== id) }));
+    setState((s) => ({
+      ...s,
+      vendas:      s.vendas.filter((v) => v.id !== id),
+      todasVendas: s.todasVendas.filter((v) => v.id !== id),
+    }));
+  }
+
+  function atualizarParcelas(vendaId: string, numeroParcela: number, changes: Partial<Parcela>) {
+    const upd = (lista: Venda[]) => lista.map((v) => {
+      if (v.id !== vendaId) return v;
+      const novas = v.parcelas.map((p) => p.numero === numeroParcela ? { ...p, ...changes } : p);
+      const todasPagas = novas.every((p) => p.status === "pago");
+      return { ...v, parcelas: novas, status: todasPagas ? "pago" as StatusPagamento : "pendente" as StatusPagamento };
+    });
+    setState((s) => ({ ...s, vendas: upd(s.vendas), todasVendas: upd(s.todasVendas) }));
   }
 
   async function registrarPagamento(vendaId: string, numeroParcela: number, valorPago: number) {
     await registrarPagamentoParcela(vendaId, numeroParcela, valorPago);
-    setState((s) => ({
-      ...s,
-      vendas: s.vendas.map((v) => {
-        if (v.id !== vendaId) return v;
-        const novas = v.parcelas.map((p) => p.numero === numeroParcela ? { ...p, status: "pago" as StatusPagamento, valorPago } : p);
-        return { ...v, parcelas: novas, status: novas.every((p) => p.status === "pago") ? "pago" as StatusPagamento : "pendente" as StatusPagamento };
-      }),
-    }));
+    atualizarParcelas(vendaId, numeroParcela, { status: "pago", valorPago });
   }
   async function desfazerPagamento(vendaId: string, numeroParcela: number) {
     await desfazerPagamentoParcela(vendaId, numeroParcela);
-    setState((s) => ({
-      ...s,
-      vendas: s.vendas.map((v) => {
-        if (v.id !== vendaId) return v;
-        return { ...v, parcelas: v.parcelas.map((p) => p.numero === numeroParcela ? { ...p, status: "pendente" as StatusPagamento, valorPago: 0 } : p), status: "pendente" as StatusPagamento };
-      }),
-    }));
+    atualizarParcelas(vendaId, numeroParcela, { status: "pendente", valorPago: 0 });
   }
   async function desmarcarParcelaPaga(vendaId: string, numeroParcela: number) {
     await updateParcelaStatus(vendaId, numeroParcela, "pendente");
-    setState((s) => ({
-      ...s,
-      vendas: s.vendas.map((v) => {
-        if (v.id !== vendaId) return v;
-        return { ...v, parcelas: v.parcelas.map((p) => p.numero === numeroParcela ? { ...p, status: "pendente" as StatusPagamento } : p), status: "pendente" as StatusPagamento };
-      }),
-    }));
+    atualizarParcelas(vendaId, numeroParcela, { status: "pendente" });
   }
   async function marcarParcelaPaga(vendaId: string, numeroParcela: number) {
     await updateParcelaStatus(vendaId, numeroParcela, "pago");
-    setState((s) => ({
-      ...s,
-      vendas: s.vendas.map((v) => {
-        if (v.id !== vendaId) return v;
-        const novas = v.parcelas.map((p) => p.numero === numeroParcela ? { ...p, status: "pago" as StatusPagamento } : p);
-        return { ...v, parcelas: novas, status: novas.every((p) => p.status === "pago") ? "pago" as StatusPagamento : "pendente" as StatusPagamento };
-      }),
-    }));
+    atualizarParcelas(vendaId, numeroParcela, { status: "pago" });
   }
   async function marcarVendaPaga(vendaId: string) {
     await updateVendaStatus(vendaId, "pago");
-    setState((s) => ({
-      ...s,
-      vendas: s.vendas.map((v) => v.id === vendaId
-        ? { ...v, status: "pago" as StatusPagamento, parcelas: v.parcelas.map((p) => ({ ...p, status: "pago" as StatusPagamento })) } : v),
-    }));
+    const upd = (lista: Venda[]) => lista.map((v) => v.id === vendaId
+      ? { ...v, status: "pago" as StatusPagamento, parcelas: v.parcelas.map((p) => ({ ...p, status: "pago" as StatusPagamento })) }
+      : v);
+    setState((s) => ({ ...s, vendas: upd(s.vendas), todasVendas: upd(s.todasVendas) }));
   }
 
   async function addProdutoPerfume(p: Omit<ProdutoPerfume, "id">) {
@@ -435,7 +425,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       compras: [{ id: nova.id, tipo: nova.tipo, produto_nome: nova.produto_nome, marca: nova.marca ?? "", quantidade: nova.quantidade, preco_usd: nova.preco_usd ?? 0, cotacao: nova.cotacao ?? 0, preco_brl: nova.preco_brl, preco_unit: nova.preco_unit, fornecedor: nova.fornecedor ?? "", origem: nova.origem ?? "", data: nova.data, observacoes: nova.observacoes ?? "" }, ...s.compras],
     }));
   }
-
   async function deleteCompraAction(id: string) {
     await deleteCompra(id);
     setState((s) => ({ ...s, compras: s.compras.filter((c) => c.id !== id) }));
@@ -488,6 +477,7 @@ export function useApp() {
 
 export function useCobrancas() {
   const { state } = useApp();
+  // Cobranças usa só as vendas do próprio usuário
   return state.vendas.flatMap((venda) => {
     if (venda.tipoPagamento !== "parcelado") return [];
     const valorTotal = venda.tipo === "perfume" ? venda.valorFinal : venda.precoVenda;
